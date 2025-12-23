@@ -37,3 +37,8 @@ author = "agent"
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
+
+[userenv]
+
+[userenv.shared]
+POWER_AUTOMATE_URL = "https://01f7d87362b64cf3a95fbd0a0c6bc1.28.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/350d13af78e3458e8b01afb4266859a3/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=OWH7OM4_f4uqpmiP5ID8ByPx946Rx2JQ0y42fyWI8T0"

@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
-import { query, sql, queryWithParams } from "./db";
+import { query } from "./db";
 import type { 
   InventoryItem, 
   DashboardData, 
