@@ -620,6 +620,60 @@ All endpoints return errors in the following format:
 
 ---
 
+---
+
+## Refresh Database Endpoints
+
+### GET /api/refresh/db
+Triggers a full database refresh from Azure SQL. This is a schedulable endpoint that:
+1. Connects to Azure SQL Server using configured credentials
+2. Fetches all data from `dbo.ProfitView` (inventory) and `dbo.RMAView` (returns)
+3. Ingests data into local PostgreSQL using batch upserts (500 records per batch)
+
+**Response:** Returns immediately with status, processes in background
+
+```json
+{
+  "message": "Refresh started",
+  "status": {
+    "isRunning": true,
+    "lastRun": "2024-12-23T10:00:00.000Z",
+    "lastStatus": "running",
+    "lastMessage": "Starting data refresh...",
+    "inventoryCount": 0,
+    "returnsCount": 0,
+    "duration": 0
+  },
+  "checkStatusAt": "/api/refresh/status"
+}
+```
+
+### GET /api/refresh/status
+Check the current refresh status and last run details.
+
+**Response:**
+```json
+{
+  "isRunning": false,
+  "lastRun": "2024-12-23T10:05:00.000Z",
+  "lastStatus": "success",
+  "lastMessage": "Refresh completed successfully",
+  "inventoryCount": 3245678,
+  "returnsCount": 12345,
+  "duration": 185432
+}
+```
+
+**Status Values:**
+- `idle` - No refresh has been run yet
+- `running` - Refresh is currently in progress
+- `success` - Last refresh completed successfully
+- `error` - Last refresh failed (see lastMessage for details)
+
+**Scheduling:** Call `GET /api/refresh/db` from any scheduler (cron, external service, etc.) to trigger periodic data syncs.
+
+---
+
 ## Data Schema Reference
 
 ### Inventory Table (70 fields)

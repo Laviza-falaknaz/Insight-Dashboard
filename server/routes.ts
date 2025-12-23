@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { db, pool } from "./db";
 import { inventory, dataUploads, returns } from "@shared/schema";
 import { eq, sql, and, gte, lte, inArray, desc, asc, count, sum, isNotNull, ne } from "drizzle-orm";
+import mssql from "mssql";
 import type { 
   DashboardData, 
   FilterDropdownOptions,
@@ -11,6 +12,44 @@ import type {
   CategoryBreakdown,
   TopPerformer
 } from "@shared/schema";
+
+// Azure SQL connection config - strip any tcp: prefix from server name
+const azureSqlServer = (process.env.SQL_SERVER || "").replace(/^tcp:/i, "");
+const azureSqlConfig: mssql.config = {
+  server: azureSqlServer,
+  database: process.env.SQL_DATABASE || "",
+  user: process.env.SQL_USERNAME || "",
+  password: process.env.SQL_PASSWORD || "",
+  options: {
+    encrypt: true,
+    trustServerCertificate: false,
+  },
+  pool: {
+    max: 10,
+    min: 0,
+    idleTimeoutMillis: 30000,
+  },
+  requestTimeout: 300000, // 5 minutes for large queries
+};
+
+// Refresh status tracking
+let refreshStatus: {
+  isRunning: boolean;
+  lastRun: Date | null;
+  lastStatus: "success" | "error" | "running" | "idle";
+  lastMessage: string;
+  inventoryCount: number;
+  returnsCount: number;
+  duration: number;
+} = {
+  isRunning: false,
+  lastRun: null,
+  lastStatus: "idle",
+  lastMessage: "No refresh has been run yet",
+  inventoryCount: 0,
+  returnsCount: 0,
+  duration: 0,
+};
 
 interface FilterParams {
   startDate?: string;
@@ -845,6 +884,352 @@ export async function registerRoutes(
       console.error("Error fetching product analytics:", error);
       res.status(500).json({ error: "Failed to fetch product analytics" });
     }
+  });
+
+  // ============================================
+  // REFRESH DB - Scheduled Data Sync Endpoint
+  // ============================================
+  
+  // Get refresh status
+  app.get("/api/refresh/status", async (_req: Request, res: Response) => {
+    res.json(refreshStatus);
+  });
+
+  // Trigger database refresh - fetches all data from Azure SQL and ingests locally
+  app.get("/api/refresh/db", async (_req: Request, res: Response) => {
+    // Prevent concurrent refreshes
+    if (refreshStatus.isRunning) {
+      return res.status(409).json({ 
+        error: "Refresh already in progress", 
+        status: refreshStatus 
+      });
+    }
+
+    const startTime = Date.now();
+    refreshStatus = {
+      isRunning: true,
+      lastRun: new Date(),
+      lastStatus: "running",
+      lastMessage: "Starting data refresh...",
+      inventoryCount: 0,
+      returnsCount: 0,
+      duration: 0,
+    };
+
+    // Respond immediately, process in background
+    res.json({ 
+      message: "Refresh started", 
+      status: refreshStatus,
+      checkStatusAt: "/api/refresh/status"
+    });
+
+    // Run refresh in background
+    (async () => {
+      let azurePool: mssql.ConnectionPool | null = null;
+      
+      try {
+        console.log("[Refresh] Connecting to Azure SQL...");
+        azurePool = await mssql.connect(azureSqlConfig);
+        
+        // ---- FETCH AND INGEST INVENTORY ----
+        console.log("[Refresh] Fetching inventory data...");
+        refreshStatus.lastMessage = "Fetching inventory data from Azure SQL...";
+        
+        const inventoryResult = await azurePool.request().query(`
+          SELECT * FROM dbo.ProfitView
+        `);
+        
+        const inventoryRows = inventoryResult.recordset;
+        console.log(`[Refresh] Fetched ${inventoryRows.length} inventory records`);
+        refreshStatus.lastMessage = `Ingesting ${inventoryRows.length} inventory records...`;
+        
+        // Batch ingest inventory using local upsert logic
+        const BATCH_SIZE = 500;
+        let inventoryProcessed = 0;
+        
+        for (let i = 0; i < inventoryRows.length; i += BATCH_SIZE) {
+          const batch = inventoryRows.slice(i, i + BATCH_SIZE);
+          
+          const columns = [
+            'data_area_id', 'item_id', 'invent_serial_id', 'deal_ref', 'purch_price_usd',
+            'purch_date', 'vend_comments', 'key_lang', 'os_sticker', 'display_size',
+            'lcd_cost_usd', 'storage_serial_num', 'vend_name', 'category', 'made_in',
+            'grade_condition', 'parts_cost_usd', 'fingerprint_str', 'misc_cost_usd',
+            'processor_gen', 'manufacturing_date', 'purchase_category', 'key_layout',
+            'po_number', 'make', 'processor', 'packaging_cost_usd', 'received_date',
+            'itad_trees_cost_usd', 'storage_type', 'sold_as_hdd', 'standardisation_cost_usd',
+            'comments', 'purch_price_revised_usd', 'status', 'consumable_cost_usd',
+            'chassis', 'journal_num', 'battery_cost_usd', 'ram', 'sold_as_ram',
+            'freight_charges_usd', 'hdd', 'refurb_cost_usd', 'final_total_cost_usd',
+            'sold_to_party', 'sales_id', 'invoicing_name', 'invoice_date',
+            'final_sales_price_usd', 'profit_usd', 'margin_pct', 'serial_num_model',
+            'model_num', 'trans_type', 'warranty_cost_usd', 'cable_cost_usd',
+            'logistics_cost_usd', 'testing_cost_usd', 'data_erase_cost_usd',
+            'labour_cost_usd', 'auction_charges_usd', 'repair_refurb_cost_usd',
+            'sourcing_fee_usd', 'total_weight_kg', 'recycled_content_pct',
+            'carbon_footprint_kg', 'trade_in_grade', 'warranty_start_date',
+            'warranty_end_date', 'warranty_description'
+          ];
+          
+          const values: unknown[] = [];
+          const valuePlaceholders: string[] = [];
+          let paramIndex = 1;
+          
+          for (const item of batch) {
+            const rowValues = [
+              item.dataAreaId || null,
+              item.ItemId || null,
+              item.InventSerialId || null,
+              item.DealRef || null,
+              item.PurchPriceUSD?.toString() || null,
+              item.PurchDate || null,
+              item.VendComments || null,
+              item.KeyLang || null,
+              item.OsSticker || null,
+              item.DisplaySize || null,
+              item.LCDCostUSD?.toString() || null,
+              item.StorageSerialNum || null,
+              item.VendName || null,
+              item.Category || null,
+              item.MadeIn || null,
+              item.GradeCondition || null,
+              item.PartsCostUSD?.toString() || null,
+              item.FingerprintStr || null,
+              item.MiscCostUSD?.toString() || null,
+              item.ProcessorGen || null,
+              item.ManufacturingDate || null,
+              item.PurchaseCategory || null,
+              item.KeyLayout || null,
+              item.PONumber || null,
+              item.Make || null,
+              item.Processor || null,
+              item.PackagingCostUSD?.toString() || null,
+              item.ReceivedDate || null,
+              item.ITADTreesCostUSD?.toString() || null,
+              item.StorageType || null,
+              item.SoldAsHDD || null,
+              item.StandardisationCostUSD?.toString() || null,
+              item.Comments || null,
+              item.PurchPriceRevisedUSD?.toString() || null,
+              item.Status || null,
+              item.ConsumableCostUSD?.toString() || null,
+              item.Chassis || null,
+              item.JournalNum || null,
+              item.BatteryCostUSD?.toString() || null,
+              item.Ram || null,
+              item.SoldAsRAM || null,
+              item.FreightChargesUSD?.toString() || null,
+              item.HDD || null,
+              item.RefurbCostUSD?.toString() || null,
+              item.FinalTotalCostUSD?.toString() || null,
+              item.SoldToParty || null,
+              item.SalesId || null,
+              item.InvoicingName || null,
+              item.InvoiceDate || null,
+              item.FinalSalesPriceUSD?.toString() || null,
+              item.ProfitUSD?.toString() || null,
+              item.MarginPct?.toString() || null,
+              item.SerialNumModel || null,
+              item.ModelNum || null,
+              item.TransType || null,
+              item.WarrantyCostUSD?.toString() || null,
+              item.CableCostUSD?.toString() || null,
+              item.LogisticsCostUSD?.toString() || null,
+              item.TestingCostUSD?.toString() || null,
+              item.DataEraseCostUSD?.toString() || null,
+              item.LabourCostUSD?.toString() || null,
+              item.AuctionChargesUSD?.toString() || null,
+              item.RepairRefurbCostUSD?.toString() || null,
+              item.SourcingFeeUSD?.toString() || null,
+              item.TotalWeightKg?.toString() || null,
+              item.RecycledContentPct?.toString() || null,
+              item.CarbonFootprintKg?.toString() || null,
+              item.TradeInGrade || null,
+              item.WarrantyStartDate || null,
+              item.WarrantyEndDate || null,
+              item.WarrantyDescription || null,
+            ];
+            
+            values.push(...rowValues);
+            const placeholders = rowValues.map(() => `$${paramIndex++}`);
+            valuePlaceholders.push(`(${placeholders.join(', ')})`);
+          }
+          
+          const query = `
+            INSERT INTO inventory (${columns.join(', ')})
+            VALUES ${valuePlaceholders.join(', ')}
+            ON CONFLICT (invent_serial_id, data_area_id, item_id, sales_id, trans_type) DO UPDATE SET
+              deal_ref = EXCLUDED.deal_ref,
+              purch_price_usd = EXCLUDED.purch_price_usd,
+              purch_date = EXCLUDED.purch_date,
+              vend_comments = EXCLUDED.vend_comments,
+              vend_name = EXCLUDED.vend_name,
+              category = EXCLUDED.category,
+              grade_condition = EXCLUDED.grade_condition,
+              make = EXCLUDED.make,
+              status = EXCLUDED.status,
+              invoicing_name = EXCLUDED.invoicing_name,
+              invoice_date = EXCLUDED.invoice_date,
+              final_sales_price_usd = EXCLUDED.final_sales_price_usd,
+              final_total_cost_usd = EXCLUDED.final_total_cost_usd
+          `;
+          
+          await pool.query(query, values);
+          inventoryProcessed += batch.length;
+          refreshStatus.inventoryCount = inventoryProcessed;
+          refreshStatus.lastMessage = `Inventory: ${inventoryProcessed}/${inventoryRows.length} processed`;
+          console.log(`[Refresh] Inventory batch ${Math.floor(i/BATCH_SIZE) + 1}: ${inventoryProcessed}/${inventoryRows.length}`);
+        }
+        
+        // ---- FETCH AND INGEST RETURNS ----
+        console.log("[Refresh] Fetching returns data...");
+        refreshStatus.lastMessage = "Fetching returns data from Azure SQL...";
+        
+        const returnsResult = await azurePool.request().query(`
+          SELECT * FROM dbo.RMAView
+        `);
+        
+        const returnsRows = returnsResult.recordset;
+        console.log(`[Refresh] Fetched ${returnsRows.length} returns records`);
+        refreshStatus.lastMessage = `Ingesting ${returnsRows.length} returns records...`;
+        
+        let returnsProcessed = 0;
+        
+        for (let i = 0; i < returnsRows.length; i += BATCH_SIZE) {
+          const batch = returnsRows.slice(i, i + BATCH_SIZE);
+          
+          const columns = [
+            'rma_line_item_guid', 'rma_header_guid', 'rma_number', 'sales_id',
+            'invent_serial_id', 'item_id', 'item_name', 'model_num', 'make',
+            'category', 'issue_description', 'resolution', 'rma_status',
+            'rma_type', 'rma_reason', 'rma_created_date', 'rma_closed_date',
+            'customer_name', 'customer_id', 'return_ship_date', 'received_date',
+            'replacement_serial_id', 'replacement_item_id', 'refund_amount_usd',
+            'credit_amount_usd', 'repair_cost_usd', 'shipping_cost_usd',
+            'restocking_fee_usd', 'warranty_claim', 'warranty_status',
+            'quality_issue', 'defect_code', 'fault_found', 'test_result',
+            'data_area_id'
+          ];
+          
+          const values: unknown[] = [];
+          const valuePlaceholders: string[] = [];
+          let paramIndex = 1;
+          
+          for (const item of batch) {
+            const rowValues = [
+              item.RMALineItemGUID || null,
+              item.RMAHeaderGUID || null,
+              item.RMANumber || null,
+              item.SalesId || null,
+              item.InventSerialId || null,
+              item.ItemId || null,
+              item.ItemName || null,
+              item.ModelNum || null,
+              item.Make || null,
+              item.Category || null,
+              item.IssueDescription || null,
+              item.Resolution || null,
+              item.RMAStatus || null,
+              item.RMAType || null,
+              item.RMAReason || null,
+              item.RMACreatedDate || null,
+              item.RMAClosedDate || null,
+              item.CustomerName || null,
+              item.CustomerId || null,
+              item.ReturnShipDate || null,
+              item.ReceivedDate || null,
+              item.ReplacementSerialId || null,
+              item.ReplacementItemId || null,
+              item.RefundAmountUSD?.toString() || null,
+              item.CreditAmountUSD?.toString() || null,
+              item.RepairCostUSD?.toString() || null,
+              item.ShippingCostUSD?.toString() || null,
+              item.RestockingFeeUSD?.toString() || null,
+              item.WarrantyClaim || null,
+              item.WarrantyStatus || null,
+              item.QualityIssue || null,
+              item.DefectCode || null,
+              item.FaultFound || null,
+              item.TestResult || null,
+              item.dataAreaId || null,
+            ];
+            
+            values.push(...rowValues);
+            const placeholders = rowValues.map(() => `$${paramIndex++}`);
+            valuePlaceholders.push(`(${placeholders.join(', ')})`);
+          }
+          
+          const query = `
+            INSERT INTO returns (${columns.join(', ')})
+            VALUES ${valuePlaceholders.join(', ')}
+            ON CONFLICT (rma_line_item_guid) DO UPDATE SET
+              rma_status = EXCLUDED.rma_status,
+              resolution = EXCLUDED.resolution,
+              rma_closed_date = EXCLUDED.rma_closed_date,
+              refund_amount_usd = EXCLUDED.refund_amount_usd,
+              credit_amount_usd = EXCLUDED.credit_amount_usd,
+              repair_cost_usd = EXCLUDED.repair_cost_usd,
+              warranty_status = EXCLUDED.warranty_status,
+              fault_found = EXCLUDED.fault_found,
+              test_result = EXCLUDED.test_result
+          `;
+          
+          await pool.query(query, values);
+          returnsProcessed += batch.length;
+          refreshStatus.returnsCount = returnsProcessed;
+          refreshStatus.lastMessage = `Returns: ${returnsProcessed}/${returnsRows.length} processed`;
+          console.log(`[Refresh] Returns batch ${Math.floor(i/BATCH_SIZE) + 1}: ${returnsProcessed}/${returnsRows.length}`);
+        }
+        
+        // Record successful upload
+        await db.insert(dataUploads).values({
+          tableName: "refresh_db",
+          recordsCount: inventoryProcessed + returnsProcessed,
+          status: "success",
+        });
+        
+        const duration = Date.now() - startTime;
+        refreshStatus = {
+          isRunning: false,
+          lastRun: new Date(),
+          lastStatus: "success",
+          lastMessage: `Refresh completed successfully`,
+          inventoryCount: inventoryProcessed,
+          returnsCount: returnsProcessed,
+          duration,
+        };
+        
+        console.log(`[Refresh] Completed in ${duration}ms - Inventory: ${inventoryProcessed}, Returns: ${returnsProcessed}`);
+        
+      } catch (error) {
+        const duration = Date.now() - startTime;
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        
+        refreshStatus = {
+          isRunning: false,
+          lastRun: new Date(),
+          lastStatus: "error",
+          lastMessage: `Refresh failed: ${errorMessage}`,
+          inventoryCount: refreshStatus.inventoryCount,
+          returnsCount: refreshStatus.returnsCount,
+          duration,
+        };
+        
+        console.error("[Refresh] Error:", error);
+        
+        // Record failed upload
+        await db.insert(dataUploads).values({
+          tableName: "refresh_db",
+          recordsCount: 0,
+          status: "error",
+        });
+        
+      } finally {
+        if (azurePool) {
+          await azurePool.close();
+        }
+      }
+    })();
   });
 
   return httpServer;
