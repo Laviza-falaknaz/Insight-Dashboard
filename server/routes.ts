@@ -1,9 +1,8 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { inventory, dataUploads, returns } from "@shared/schema";
 import { eq, sql, and, gte, lte, inArray, desc, asc, count, sum, isNotNull, ne } from "drizzle-orm";
-import pg from "pg";
 import type { 
   DashboardData, 
   FilterDropdownOptions,
@@ -178,6 +177,7 @@ export async function registerRoutes(
   });
   
   // Upsert inventory data endpoint - handles duplicates efficiently for 3M+ records
+  // Uses batch multi-row inserts for high throughput
   app.post("/api/data/inventory/upsert", async (req: Request, res: Response) => {
     try {
       const items = req.body;
@@ -190,24 +190,38 @@ export async function registerRoutes(
         return res.status(400).json({ error: "No items provided" });
       }
 
-      // Use raw pool for efficient bulk operations
-      const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-      
-      let insertedCount = 0;
-      let updatedCount = 0;
+      let totalProcessed = 0;
       const batchSize = 500;
+      const columns = [
+        'data_area_id', 'item_id', 'invent_serial_id', 'deal_ref', 'purch_price_usd',
+        'purch_date', 'vend_comments', 'key_lang', 'os_sticker', 'display_size',
+        'lcd_cost_usd', 'storage_serial_num', 'vend_name', 'category', 'made_in',
+        'grade_condition', 'parts_cost_usd', 'fingerprint_str', 'misc_cost_usd', 'processor_gen',
+        'manufacturing_date', 'purchase_category', 'key_layout', 'po_number', 'make',
+        'processor', 'packaging_cost_usd', 'received_date', 'itad_trees_cost_usd', 'storage_type',
+        'sold_as_hdd', 'standardisation_cost_usd', 'comments', 'purch_price_revised_usd', 'status',
+        'consumable_cost_usd', 'chassis', 'journal_num', 'battery_cost_usd', 'ram',
+        'sold_as_ram', 'freight_charges_usd', 'hdd', 'coa_cost_usd', 'manufacturer_serial_num',
+        'supplier_pallet_num', 'resource_cost_usd', 'customs_duty_usd', 'resolution', 'model_num',
+        'invoice_account', 'total_cost_cur_usd', 'sales_order_date', 'customer_ref', 'crm_ref',
+        'invoicing_name', 'trans_type', 'sales_invoice_id', 'sales_id', 'invoice_date',
+        'apin_number', 'segregation', 'final_sales_price_usd', 'final_total_cost_usd', 'order_taker',
+        'order_responsible', 'product_specification', 'warranty_start_date', 'warranty_end_date', 'warranty_description'
+      ];
       
       for (let i = 0; i < items.length; i += batchSize) {
-        const batch = items.slice(i, i + batchSize);
+        const batch = items.slice(i, i + batchSize).filter((item: Record<string, unknown>) => item.InventSerialId);
+        if (batch.length === 0) continue;
+        
+        const values: unknown[] = [];
+        const valuePlaceholders: string[] = [];
+        let paramIndex = 1;
         
         for (const item of batch) {
-          const inventSerialId = item.InventSerialId as string;
-          if (!inventSerialId) continue;
-          
-          const values = [
+          const rowValues = [
             item.dataAreaId || null,
             item.ItemId || null,
-            inventSerialId,
+            item.InventSerialId,
             item.DealRef || null,
             item.PurchPriceUSD?.toString() || null,
             item.PurchDate || null,
@@ -277,74 +291,49 @@ export async function registerRoutes(
             item.WarrantyDescription || null,
           ];
           
-          const result = await pool.query(`
-            INSERT INTO inventory (
-              data_area_id, item_id, invent_serial_id, deal_ref, purch_price_usd,
-              purch_date, vend_comments, key_lang, os_sticker, display_size,
-              lcd_cost_usd, storage_serial_num, vend_name, category, made_in,
-              grade_condition, parts_cost_usd, fingerprint_str, misc_cost_usd, processor_gen,
-              manufacturing_date, purchase_category, key_layout, po_number, make,
-              processor, packaging_cost_usd, received_date, itad_trees_cost_usd, storage_type,
-              sold_as_hdd, standardisation_cost_usd, comments, purch_price_revised_usd, status,
-              consumable_cost_usd, chassis, journal_num, battery_cost_usd, ram,
-              sold_as_ram, freight_charges_usd, hdd, coa_cost_usd, manufacturer_serial_num,
-              supplier_pallet_num, resource_cost_usd, customs_duty_usd, resolution, model_num,
-              invoice_account, total_cost_cur_usd, sales_order_date, customer_ref, crm_ref,
-              invoicing_name, trans_type, sales_invoice_id, sales_id, invoice_date,
-              apin_number, segregation, final_sales_price_usd, final_total_cost_usd, order_taker,
-              order_responsible, product_specification, warranty_start_date, warranty_end_date, warranty_description
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-              $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-              $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-              $31, $32, $33, $34, $35, $36, $37, $38, $39, $40,
-              $41, $42, $43, $44, $45, $46, $47, $48, $49, $50,
-              $51, $52, $53, $54, $55, $56, $57, $58, $59, $60,
-              $61, $62, $63, $64, $65, $66, $67, $68, $69, $70
-            )
-            ON CONFLICT (invent_serial_id) DO UPDATE SET
-              data_area_id = EXCLUDED.data_area_id,
-              item_id = EXCLUDED.item_id,
-              deal_ref = EXCLUDED.deal_ref,
-              purch_price_usd = EXCLUDED.purch_price_usd,
-              purch_date = EXCLUDED.purch_date,
-              vend_comments = EXCLUDED.vend_comments,
-              vend_name = EXCLUDED.vend_name,
-              category = EXCLUDED.category,
-              grade_condition = EXCLUDED.grade_condition,
-              make = EXCLUDED.make,
-              status = EXCLUDED.status,
-              invoicing_name = EXCLUDED.invoicing_name,
-              invoice_date = EXCLUDED.invoice_date,
-              final_sales_price_usd = EXCLUDED.final_sales_price_usd,
-              final_total_cost_usd = EXCLUDED.final_total_cost_usd
-            RETURNING (xmax = 0) AS inserted
-          `, values);
-          
-          if (result.rows[0]?.inserted) {
-            insertedCount++;
-          } else {
-            updatedCount++;
-          }
+          values.push(...rowValues);
+          const placeholders = rowValues.map(() => `$${paramIndex++}`);
+          valuePlaceholders.push(`(${placeholders.join(', ')})`);
         }
+        
+        const query = `
+          INSERT INTO inventory (${columns.join(', ')})
+          VALUES ${valuePlaceholders.join(', ')}
+          ON CONFLICT (invent_serial_id) DO UPDATE SET
+            data_area_id = EXCLUDED.data_area_id,
+            item_id = EXCLUDED.item_id,
+            deal_ref = EXCLUDED.deal_ref,
+            purch_price_usd = EXCLUDED.purch_price_usd,
+            purch_date = EXCLUDED.purch_date,
+            vend_comments = EXCLUDED.vend_comments,
+            vend_name = EXCLUDED.vend_name,
+            category = EXCLUDED.category,
+            grade_condition = EXCLUDED.grade_condition,
+            make = EXCLUDED.make,
+            status = EXCLUDED.status,
+            invoicing_name = EXCLUDED.invoicing_name,
+            invoice_date = EXCLUDED.invoice_date,
+            final_sales_price_usd = EXCLUDED.final_sales_price_usd,
+            final_total_cost_usd = EXCLUDED.final_total_cost_usd
+        `;
+        
+        await pool.query(query, values);
+        totalProcessed += batch.length;
       }
-      
-      await pool.end();
       
       // Record the upload
       await db.insert(dataUploads).values({
         tableName: "inventory",
         recordsCount: items.length,
-        insertedCount,
-        updatedCount,
+        insertedCount: totalProcessed,
+        updatedCount: 0,
         status: "completed",
       });
       
       res.json({ 
         success: true, 
-        message: `Processed ${items.length} records`,
-        inserted: insertedCount,
-        updated: updatedCount
+        message: `Processed ${totalProcessed} records`,
+        processed: totalProcessed
       });
     } catch (error) {
       console.error("Error upserting inventory data:", error);
@@ -353,6 +342,7 @@ export async function registerRoutes(
   });
 
   // Upsert returns data endpoint - handles duplicates efficiently
+  // Uses batch multi-row inserts for high throughput
   app.post("/api/data/returns/upsert", async (req: Request, res: Response) => {
     try {
       const items = req.body;
@@ -365,20 +355,28 @@ export async function registerRoutes(
         return res.status(400).json({ error: "No items provided" });
       }
 
-      const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-      
-      let insertedCount = 0;
-      let updatedCount = 0;
+      let totalProcessed = 0;
       const batchSize = 500;
+      const columns = [
+        'final_customer', 'related_order_name', 'case_id', 'rma_number', 'reason_for_return',
+        'created_on', 'warehouse_notes', 'final_reseller_name', 'expected_shipping_date', 'rma_line_item_guid',
+        'rma_line_name', 'case_end_user', 'uae_warehouse_notes', 'notes_description', 'rma_guid',
+        'related_serial_guid', 'modified_on', 'opportunity_number', 'item_testing_date', 'final_distributor_name',
+        'case_customer', 'item_received_date', 'case_description', 'dispatch_date', 'replacement_serial_guid',
+        'rma_status', 'type_of_unit', 'line_status', 'line_solution', 'uae_final_outcome',
+        'rma_topic_label', 'uk_final_outcome', 'serial_id', 'area_id', 'item_id'
+      ];
       
       for (let i = 0; i < items.length; i += batchSize) {
-        const batch = items.slice(i, i + batchSize);
+        const batch = items.slice(i, i + batchSize).filter((item: Record<string, unknown>) => item.RMALineItemGUID);
+        if (batch.length === 0) continue;
+        
+        const values: unknown[] = [];
+        const valuePlaceholders: string[] = [];
+        let paramIndex = 1;
         
         for (const item of batch) {
-          const rmaLineItemGuid = item.RMALineItemGUID as string;
-          if (!rmaLineItemGuid) continue;
-          
-          const values = [
+          const rowValues = [
             item.FinalCustomer || null,
             item.RelatedOrderName || null,
             item.CaseID || null,
@@ -388,7 +386,7 @@ export async function registerRoutes(
             item.WarehouseNotes || null,
             item.FinalResellerName || null,
             item.ExpectedShippingDate || null,
-            rmaLineItemGuid,
+            item.RMALineItemGUID,
             item.RMALineName || null,
             item.CaseEndUser || null,
             item.UAEWarehosueNotes || null,
@@ -416,60 +414,45 @@ export async function registerRoutes(
             item.ItemID || null,
           ];
           
-          const result = await pool.query(`
-            INSERT INTO returns (
-              final_customer, related_order_name, case_id, rma_number, reason_for_return,
-              created_on, warehouse_notes, final_reseller_name, expected_shipping_date, rma_line_item_guid,
-              rma_line_name, case_end_user, uae_warehouse_notes, notes_description, rma_guid,
-              related_serial_guid, modified_on, opportunity_number, item_testing_date, final_distributor_name,
-              case_customer, item_received_date, case_description, dispatch_date, replacement_serial_guid,
-              rma_status, type_of_unit, line_status, line_solution, uae_final_outcome,
-              rma_topic_label, uk_final_outcome, serial_id, area_id, item_id
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-              $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-              $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-              $31, $32, $33, $34, $35
-            )
-            ON CONFLICT (rma_line_item_guid) DO UPDATE SET
-              final_customer = EXCLUDED.final_customer,
-              rma_number = EXCLUDED.rma_number,
-              reason_for_return = EXCLUDED.reason_for_return,
-              warehouse_notes = EXCLUDED.warehouse_notes,
-              modified_on = EXCLUDED.modified_on,
-              rma_status = EXCLUDED.rma_status,
-              line_status = EXCLUDED.line_status,
-              line_solution = EXCLUDED.line_solution,
-              uae_final_outcome = EXCLUDED.uae_final_outcome,
-              uk_final_outcome = EXCLUDED.uk_final_outcome,
-              updated_at = NOW()
-            RETURNING (xmax = 0) AS inserted
-          `, values);
-          
-          if (result.rows[0]?.inserted) {
-            insertedCount++;
-          } else {
-            updatedCount++;
-          }
+          values.push(...rowValues);
+          const placeholders = rowValues.map(() => `$${paramIndex++}`);
+          valuePlaceholders.push(`(${placeholders.join(', ')})`);
         }
+        
+        const query = `
+          INSERT INTO returns (${columns.join(', ')})
+          VALUES ${valuePlaceholders.join(', ')}
+          ON CONFLICT (rma_line_item_guid) DO UPDATE SET
+            final_customer = EXCLUDED.final_customer,
+            rma_number = EXCLUDED.rma_number,
+            reason_for_return = EXCLUDED.reason_for_return,
+            warehouse_notes = EXCLUDED.warehouse_notes,
+            modified_on = EXCLUDED.modified_on,
+            rma_status = EXCLUDED.rma_status,
+            line_status = EXCLUDED.line_status,
+            line_solution = EXCLUDED.line_solution,
+            uae_final_outcome = EXCLUDED.uae_final_outcome,
+            uk_final_outcome = EXCLUDED.uk_final_outcome,
+            updated_at = NOW()
+        `;
+        
+        await pool.query(query, values);
+        totalProcessed += batch.length;
       }
-      
-      await pool.end();
       
       // Record the upload
       await db.insert(dataUploads).values({
         tableName: "returns",
         recordsCount: items.length,
-        insertedCount,
-        updatedCount,
+        insertedCount: totalProcessed,
+        updatedCount: 0,
         status: "completed",
       });
       
       res.json({ 
         success: true, 
-        message: `Processed ${items.length} records`,
-        inserted: insertedCount,
-        updated: updatedCount
+        message: `Processed ${totalProcessed} records`,
+        processed: totalProcessed
       });
     } catch (error) {
       console.error("Error upserting returns data:", error);
