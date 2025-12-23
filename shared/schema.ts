@@ -92,7 +92,13 @@ export const inventory = pgTable("inventory", {
   warrantyDescription: text("warranty_description"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
-  inventSerialIdUnique: uniqueIndex("inventory_invent_serial_id_unique").on(table.inventSerialId),
+  inventoryCompositeUnique: uniqueIndex("inventory_composite_unique").on(
+    table.inventSerialId, 
+    table.dataAreaId, 
+    table.itemId, 
+    table.salesId, 
+    table.transType
+  ),
   invoiceDateIdx: index("inventory_invoice_date_idx").on(table.invoiceDate),
   statusIdx: index("inventory_status_idx").on(table.status),
   categoryIdx: index("inventory_category_idx").on(table.category),

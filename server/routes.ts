@@ -299,9 +299,7 @@ export async function registerRoutes(
         const query = `
           INSERT INTO inventory (${columns.join(', ')})
           VALUES ${valuePlaceholders.join(', ')}
-          ON CONFLICT (invent_serial_id) DO UPDATE SET
-            data_area_id = EXCLUDED.data_area_id,
-            item_id = EXCLUDED.item_id,
+          ON CONFLICT (invent_serial_id, data_area_id, item_id, sales_id, trans_type) DO UPDATE SET
             deal_ref = EXCLUDED.deal_ref,
             purch_price_usd = EXCLUDED.purch_price_usd,
             purch_date = EXCLUDED.purch_date,

@@ -64,10 +64,16 @@ Efficiently inserts or updates inventory records. Uses PostgreSQL's `ON CONFLICT
 ]
 ```
 
-**Required Fields:**
+**Required Fields (Composite Upsert Key):**
 | Field | Type | Description |
 |-------|------|-------------|
-| `InventSerialId` | string | Unique serial identifier (used as deduplication key) |
+| `InventSerialId` | string | Serial identifier (part of composite key) |
+| `dataAreaId` | string | Data area identifier (part of composite key) |
+| `ItemId` | string | Item/product identifier (part of composite key) |
+| `SalesId` | string | Sales ID (part of composite key) |
+| `TransType` | string | Transaction type (part of composite key) |
+
+**Note:** The upsert uses a composite key of (`InventSerialId`, `dataAreaId`, `ItemId`, `SalesId`, `TransType`) for deduplication. Records with matching values in all five fields will be updated; otherwise, a new record is inserted.
 
 **Optional Fields (70 total):**
 | Field | Type | Description |
@@ -618,7 +624,7 @@ All endpoints return errors in the following format:
 
 ### Inventory Table (70 fields)
 Primary Key: `id` (auto-generated)
-Unique Constraint: `invent_serial_id`
+Unique Constraint: Composite key on (`invent_serial_id`, `data_area_id`, `item_id`, `sales_id`, `trans_type`)
 
 ### Returns Table (35 fields)
 Primary Key: `id` (auto-generated)
