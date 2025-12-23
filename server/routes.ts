@@ -1,8 +1,9 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { db } from "./db";
-import { inventory, dataUploads } from "@shared/schema";
+import { inventory, dataUploads, returns } from "@shared/schema";
 import { eq, sql, and, gte, lte, inArray, desc, asc, count, sum, isNotNull, ne } from "drizzle-orm";
+import pg from "pg";
 import type { 
   DashboardData, 
   FilterDropdownOptions,
@@ -176,11 +177,346 @@ export async function registerRoutes(
     }
   });
   
-  // Clear all data endpoint
-  app.delete("/api/data/clear", async (_req: Request, res: Response) => {
+  // Upsert inventory data endpoint - handles duplicates efficiently for 3M+ records
+  app.post("/api/data/inventory/upsert", async (req: Request, res: Response) => {
     try {
-      await db.delete(inventory);
-      res.json({ success: true, message: "All inventory data cleared" });
+      const items = req.body;
+      
+      if (!Array.isArray(items)) {
+        return res.status(400).json({ error: "Request body must be an array of inventory items" });
+      }
+      
+      if (items.length === 0) {
+        return res.status(400).json({ error: "No items provided" });
+      }
+
+      // Use raw pool for efficient bulk operations
+      const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+      
+      let insertedCount = 0;
+      let updatedCount = 0;
+      const batchSize = 500;
+      
+      for (let i = 0; i < items.length; i += batchSize) {
+        const batch = items.slice(i, i + batchSize);
+        
+        for (const item of batch) {
+          const inventSerialId = item.InventSerialId as string;
+          if (!inventSerialId) continue;
+          
+          const values = [
+            item.dataAreaId || null,
+            item.ItemId || null,
+            inventSerialId,
+            item.DealRef || null,
+            item.PurchPriceUSD?.toString() || null,
+            item.PurchDate || null,
+            item.VendComments || null,
+            item.KeyLang || null,
+            item.OsSticker || null,
+            item.DisplaySize || null,
+            item.LCDCostUSD?.toString() || null,
+            item.StorageSerialNum || null,
+            item.VendName || null,
+            item.Category || null,
+            item.MadeIn || null,
+            item.GradeCondition || null,
+            item.PartsCostUSD?.toString() || null,
+            item.FingerprintStr || null,
+            item.MiscCostUSD?.toString() || null,
+            item.ProcessorGen || null,
+            item.ManufacturingDate || null,
+            item.PurchaseCategory || null,
+            item.KeyLayout || null,
+            item.PONumber || null,
+            item.Make || null,
+            item.Processor || null,
+            item.PackagingCostUSD?.toString() || null,
+            item.ReceivedDate || null,
+            item.ITADTreesCostUSD?.toString() || null,
+            item.StorageType || null,
+            item.SoldAsHDD || null,
+            item.StandardisationCostUSD?.toString() || null,
+            item.Comments || null,
+            item.PurchPriceRevisedUSD?.toString() || null,
+            item.Status || null,
+            item.ConsumableCostUSD?.toString() || null,
+            item.Chassis || null,
+            item.JournalNum || null,
+            item.BatteryCostUSD?.toString() || null,
+            item.Ram || null,
+            item.SoldAsRAM || null,
+            item.FreightChargesUSD?.toString() || null,
+            item.HDD || null,
+            item.COACostUSD?.toString() || null,
+            item.ManufacturerSerialNum || null,
+            item.SupplierPalletNum || null,
+            item.ResourceCostUSD?.toString() || null,
+            item.CustomsDutyUSD?.toString() || null,
+            item.Resolution || null,
+            item.ModelNum || null,
+            item.InvoiceAccount || null,
+            item.TotalCostCurUSD?.toString() || null,
+            item.SalesOrderDate || null,
+            item.CustomerRef || null,
+            item.CRMRef || null,
+            item.InvoicingName || null,
+            item.TransType || null,
+            item.SalesInvoiceId || null,
+            item.SalesId || null,
+            item.InvoiceDate || null,
+            item.APINNumber || null,
+            item.Segregation || null,
+            item.FinalSalesPriceUSD?.toString() || null,
+            item.FinalTotalCostUSD?.toString() || null,
+            item.OrderTaker || null,
+            item.OrderResponsible || null,
+            item.ProductSpecification || null,
+            item.WarrantyStartDate || null,
+            item.WarrantyEndDate || null,
+            item.WarrantyDescription || null,
+          ];
+          
+          const result = await pool.query(`
+            INSERT INTO inventory (
+              data_area_id, item_id, invent_serial_id, deal_ref, purch_price_usd,
+              purch_date, vend_comments, key_lang, os_sticker, display_size,
+              lcd_cost_usd, storage_serial_num, vend_name, category, made_in,
+              grade_condition, parts_cost_usd, fingerprint_str, misc_cost_usd, processor_gen,
+              manufacturing_date, purchase_category, key_layout, po_number, make,
+              processor, packaging_cost_usd, received_date, itad_trees_cost_usd, storage_type,
+              sold_as_hdd, standardisation_cost_usd, comments, purch_price_revised_usd, status,
+              consumable_cost_usd, chassis, journal_num, battery_cost_usd, ram,
+              sold_as_ram, freight_charges_usd, hdd, coa_cost_usd, manufacturer_serial_num,
+              supplier_pallet_num, resource_cost_usd, customs_duty_usd, resolution, model_num,
+              invoice_account, total_cost_cur_usd, sales_order_date, customer_ref, crm_ref,
+              invoicing_name, trans_type, sales_invoice_id, sales_id, invoice_date,
+              apin_number, segregation, final_sales_price_usd, final_total_cost_usd, order_taker,
+              order_responsible, product_specification, warranty_start_date, warranty_end_date, warranty_description
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+              $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+              $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
+              $31, $32, $33, $34, $35, $36, $37, $38, $39, $40,
+              $41, $42, $43, $44, $45, $46, $47, $48, $49, $50,
+              $51, $52, $53, $54, $55, $56, $57, $58, $59, $60,
+              $61, $62, $63, $64, $65, $66, $67, $68, $69, $70
+            )
+            ON CONFLICT (invent_serial_id) DO UPDATE SET
+              data_area_id = EXCLUDED.data_area_id,
+              item_id = EXCLUDED.item_id,
+              deal_ref = EXCLUDED.deal_ref,
+              purch_price_usd = EXCLUDED.purch_price_usd,
+              purch_date = EXCLUDED.purch_date,
+              vend_comments = EXCLUDED.vend_comments,
+              vend_name = EXCLUDED.vend_name,
+              category = EXCLUDED.category,
+              grade_condition = EXCLUDED.grade_condition,
+              make = EXCLUDED.make,
+              status = EXCLUDED.status,
+              invoicing_name = EXCLUDED.invoicing_name,
+              invoice_date = EXCLUDED.invoice_date,
+              final_sales_price_usd = EXCLUDED.final_sales_price_usd,
+              final_total_cost_usd = EXCLUDED.final_total_cost_usd
+            RETURNING (xmax = 0) AS inserted
+          `, values);
+          
+          if (result.rows[0]?.inserted) {
+            insertedCount++;
+          } else {
+            updatedCount++;
+          }
+        }
+      }
+      
+      await pool.end();
+      
+      // Record the upload
+      await db.insert(dataUploads).values({
+        tableName: "inventory",
+        recordsCount: items.length,
+        insertedCount,
+        updatedCount,
+        status: "completed",
+      });
+      
+      res.json({ 
+        success: true, 
+        message: `Processed ${items.length} records`,
+        inserted: insertedCount,
+        updated: updatedCount
+      });
+    } catch (error) {
+      console.error("Error upserting inventory data:", error);
+      res.status(500).json({ error: "Failed to upsert data", details: String(error) });
+    }
+  });
+
+  // Upsert returns data endpoint - handles duplicates efficiently
+  app.post("/api/data/returns/upsert", async (req: Request, res: Response) => {
+    try {
+      const items = req.body;
+      
+      if (!Array.isArray(items)) {
+        return res.status(400).json({ error: "Request body must be an array of return items" });
+      }
+      
+      if (items.length === 0) {
+        return res.status(400).json({ error: "No items provided" });
+      }
+
+      const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+      
+      let insertedCount = 0;
+      let updatedCount = 0;
+      const batchSize = 500;
+      
+      for (let i = 0; i < items.length; i += batchSize) {
+        const batch = items.slice(i, i + batchSize);
+        
+        for (const item of batch) {
+          const rmaLineItemGuid = item.RMALineItemGUID as string;
+          if (!rmaLineItemGuid) continue;
+          
+          const values = [
+            item.FinalCustomer || null,
+            item.RelatedOrderName || null,
+            item.CaseID || null,
+            item.RMANumber || null,
+            item.ReasonforReturn || null,
+            item.CreatedOn || null,
+            item.WarehouseNotes || null,
+            item.FinalResellerName || null,
+            item.ExpectedShippingDate || null,
+            rmaLineItemGuid,
+            item.RMALineName || null,
+            item.CaseEndUser || null,
+            item.UAEWarehosueNotes || null,
+            item.NotesDescription || null,
+            item.RMAGUID || null,
+            item.RelatedSerialGUID || null,
+            item.ModifiedOn || null,
+            item.OpportunityNumber || null,
+            item.ItemTestingDate || null,
+            item.FinalDistributorName || null,
+            item.CaseCustomer || null,
+            item.ItemReceivedDate || null,
+            item.CaseDescription || null,
+            item.DispatchDate || null,
+            item.ReplacementSerialGUID || null,
+            item.RMAStatus || null,
+            item.TypeOfUnit || null,
+            item.LineStatus || null,
+            item.LineSolution || null,
+            item.UAEFinalOutcome || null,
+            item.RMATopicLabel || null,
+            item.UKFinalOutcome || null,
+            item.SerialID || null,
+            item.AreaID || null,
+            item.ItemID || null,
+          ];
+          
+          const result = await pool.query(`
+            INSERT INTO returns (
+              final_customer, related_order_name, case_id, rma_number, reason_for_return,
+              created_on, warehouse_notes, final_reseller_name, expected_shipping_date, rma_line_item_guid,
+              rma_line_name, case_end_user, uae_warehouse_notes, notes_description, rma_guid,
+              related_serial_guid, modified_on, opportunity_number, item_testing_date, final_distributor_name,
+              case_customer, item_received_date, case_description, dispatch_date, replacement_serial_guid,
+              rma_status, type_of_unit, line_status, line_solution, uae_final_outcome,
+              rma_topic_label, uk_final_outcome, serial_id, area_id, item_id
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+              $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+              $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
+              $31, $32, $33, $34, $35
+            )
+            ON CONFLICT (rma_line_item_guid) DO UPDATE SET
+              final_customer = EXCLUDED.final_customer,
+              rma_number = EXCLUDED.rma_number,
+              reason_for_return = EXCLUDED.reason_for_return,
+              warehouse_notes = EXCLUDED.warehouse_notes,
+              modified_on = EXCLUDED.modified_on,
+              rma_status = EXCLUDED.rma_status,
+              line_status = EXCLUDED.line_status,
+              line_solution = EXCLUDED.line_solution,
+              uae_final_outcome = EXCLUDED.uae_final_outcome,
+              uk_final_outcome = EXCLUDED.uk_final_outcome,
+              updated_at = NOW()
+            RETURNING (xmax = 0) AS inserted
+          `, values);
+          
+          if (result.rows[0]?.inserted) {
+            insertedCount++;
+          } else {
+            updatedCount++;
+          }
+        }
+      }
+      
+      await pool.end();
+      
+      // Record the upload
+      await db.insert(dataUploads).values({
+        tableName: "returns",
+        recordsCount: items.length,
+        insertedCount,
+        updatedCount,
+        status: "completed",
+      });
+      
+      res.json({ 
+        success: true, 
+        message: `Processed ${items.length} records`,
+        inserted: insertedCount,
+        updated: updatedCount
+      });
+    } catch (error) {
+      console.error("Error upserting returns data:", error);
+      res.status(500).json({ error: "Failed to upsert data", details: String(error) });
+    }
+  });
+
+  // Get returns data
+  app.get("/api/returns", async (req: Request, res: Response) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 1000;
+      const items = await db.select().from(returns)
+        .orderBy(desc(returns.createdOn))
+        .limit(limit);
+      res.json(items);
+    } catch (error) {
+      console.error("Error fetching returns:", error);
+      res.status(500).json({ error: "Failed to fetch returns data" });
+    }
+  });
+
+  // Get returns count
+  app.get("/api/data/returns/count", async (_req: Request, res: Response) => {
+    try {
+      const result = await db.select({ count: count() }).from(returns);
+      res.json({ count: result[0]?.count || 0 });
+    } catch (error) {
+      console.error("Error fetching returns count:", error);
+      res.status(500).json({ error: "Failed to fetch returns count" });
+    }
+  });
+
+  // Clear all data endpoint (now clears both tables)
+  app.delete("/api/data/clear", async (req: Request, res: Response) => {
+    try {
+      const table = req.query.table as string;
+      if (table === "inventory") {
+        await db.delete(inventory);
+        res.json({ success: true, message: "Inventory data cleared" });
+      } else if (table === "returns") {
+        await db.delete(returns);
+        res.json({ success: true, message: "Returns data cleared" });
+      } else {
+        await db.delete(inventory);
+        await db.delete(returns);
+        res.json({ success: true, message: "All data cleared" });
+      }
     } catch (error) {
       console.error("Error clearing data:", error);
       res.status(500).json({ error: "Failed to clear data" });
