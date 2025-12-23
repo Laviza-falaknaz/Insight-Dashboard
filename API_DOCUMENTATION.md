@@ -625,10 +625,21 @@ All endpoints return errors in the following format:
 ## Refresh Database Endpoints
 
 ### GET /api/refresh/db
-Triggers a full database refresh from Azure SQL. This is a schedulable endpoint that:
-1. Connects to Azure SQL Server using configured credentials
-2. Fetches all data from `dbo.ProfitView` (inventory) and `dbo.RMAView` (returns)
+Triggers a full database refresh via Power Automate. This is a schedulable endpoint that:
+1. Calls Power Automate HTTP endpoint (configured via POWER_AUTOMATE_URL env var)
+2. Fetches all data from `Inventory` and `RMAs` tables
 3. Ingests data into local PostgreSQL using batch upserts (500 records per batch)
+
+**Environment Variable Required:** `POWER_AUTOMATE_URL`
+
+**Power Automate Request Format:**
+```json
+// For Inventory
+{ "table": "Inventory", "query": "SELECT * FROM Inventory" }
+
+// For RMAs
+{ "table": "RMAs", "query": "SELECT * FROM RMAs" }
+```
 
 **Response:** Returns immediately with status, processes in background
 

@@ -3,7 +3,6 @@ import { createServer, type Server } from "http";
 import { db, pool } from "./db";
 import { inventory, dataUploads, returns } from "@shared/schema";
 import { eq, sql, and, gte, lte, inArray, desc, asc, count, sum, isNotNull, ne } from "drizzle-orm";
-import mssql from "mssql";
 import type { 
   DashboardData, 
   FilterDropdownOptions,
@@ -13,24 +12,8 @@ import type {
   TopPerformer
 } from "@shared/schema";
 
-// Azure SQL connection config - strip any tcp: prefix from server name
-const azureSqlServer = (process.env.SQL_SERVER || "").replace(/^tcp:/i, "");
-const azureSqlConfig: mssql.config = {
-  server: azureSqlServer,
-  database: process.env.SQL_DATABASE || "",
-  user: process.env.SQL_USERNAME || "",
-  password: process.env.SQL_PASSWORD || "",
-  options: {
-    encrypt: true,
-    trustServerCertificate: false,
-  },
-  pool: {
-    max: 10,
-    min: 0,
-    idleTimeoutMillis: 30000,
-  },
-  requestTimeout: 300000, // 5 minutes for large queries
-};
+// Power Automate endpoint for SQL queries (from environment variable)
+const POWER_AUTOMATE_URL = process.env.POWER_AUTOMATE_URL || "";
 
 // Refresh status tracking
 let refreshStatus: {
@@ -895,13 +878,19 @@ export async function registerRoutes(
     res.json(refreshStatus);
   });
 
-  // Trigger database refresh - fetches all data from Azure SQL and ingests locally
+  // Trigger database refresh - fetches all data via Power Automate and ingests locally
   app.get("/api/refresh/db", async (_req: Request, res: Response) => {
     // Prevent concurrent refreshes
     if (refreshStatus.isRunning) {
       return res.status(409).json({ 
         error: "Refresh already in progress", 
         status: refreshStatus 
+      });
+    }
+
+    if (!POWER_AUTOMATE_URL) {
+      return res.status(500).json({ 
+        error: "POWER_AUTOMATE_URL environment variable not configured" 
       });
     }
 
@@ -925,26 +914,28 @@ export async function registerRoutes(
 
     // Run refresh in background
     (async () => {
-      let azurePool: mssql.ConnectionPool | null = null;
-      
       try {
-        console.log("[Refresh] Connecting to Azure SQL...");
-        azurePool = await mssql.connect(azureSqlConfig);
+        const BATCH_SIZE = 500;
         
         // ---- FETCH AND INGEST INVENTORY ----
-        console.log("[Refresh] Fetching inventory data...");
-        refreshStatus.lastMessage = "Fetching inventory data from Azure SQL...";
+        console.log("[Refresh] Fetching inventory data via Power Automate...");
+        refreshStatus.lastMessage = "Fetching inventory data...";
         
-        const inventoryResult = await azurePool.request().query(`
-          SELECT * FROM dbo.ProfitView
-        `);
+        const inventoryResponse = await fetch(POWER_AUTOMATE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ table: "Inventory", query: "SELECT * FROM Inventory" }),
+        });
         
-        const inventoryRows = inventoryResult.recordset;
+        if (!inventoryResponse.ok) {
+          throw new Error(`Inventory fetch failed: ${inventoryResponse.status} ${inventoryResponse.statusText}`);
+        }
+        
+        const inventoryData = await inventoryResponse.json();
+        const inventoryRows = Array.isArray(inventoryData) ? inventoryData : (inventoryData.value || inventoryData.data || []);
         console.log(`[Refresh] Fetched ${inventoryRows.length} inventory records`);
         refreshStatus.lastMessage = `Ingesting ${inventoryRows.length} inventory records...`;
         
-        // Batch ingest inventory using local upsert logic
-        const BATCH_SIZE = 500;
         let inventoryProcessed = 0;
         
         for (let i = 0; i < inventoryRows.length; i += BATCH_SIZE) {
@@ -960,15 +951,13 @@ export async function registerRoutes(
             'itad_trees_cost_usd', 'storage_type', 'sold_as_hdd', 'standardisation_cost_usd',
             'comments', 'purch_price_revised_usd', 'status', 'consumable_cost_usd',
             'chassis', 'journal_num', 'battery_cost_usd', 'ram', 'sold_as_ram',
-            'freight_charges_usd', 'hdd', 'refurb_cost_usd', 'final_total_cost_usd',
-            'sold_to_party', 'sales_id', 'invoicing_name', 'invoice_date',
-            'final_sales_price_usd', 'profit_usd', 'margin_pct', 'serial_num_model',
-            'model_num', 'trans_type', 'warranty_cost_usd', 'cable_cost_usd',
-            'logistics_cost_usd', 'testing_cost_usd', 'data_erase_cost_usd',
-            'labour_cost_usd', 'auction_charges_usd', 'repair_refurb_cost_usd',
-            'sourcing_fee_usd', 'total_weight_kg', 'recycled_content_pct',
-            'carbon_footprint_kg', 'trade_in_grade', 'warranty_start_date',
-            'warranty_end_date', 'warranty_description'
+            'freight_charges_usd', 'hdd', 'coa_cost_usd', 'manufacturer_serial_num',
+            'supplier_pallet_num', 'resource_cost_usd', 'customs_duty_usd', 'resolution',
+            'model_num', 'invoice_account', 'total_cost_cur_usd', 'sales_order_date',
+            'customer_ref', 'crm_ref', 'invoicing_name', 'trans_type', 'sales_invoice_id',
+            'sales_id', 'invoice_date', 'apin_number', 'segregation', 'final_sales_price_usd',
+            'final_total_cost_usd', 'order_taker', 'order_responsible', 'product_specification',
+            'warranty_start_date', 'warranty_end_date', 'warranty_description'
           ];
           
           const values: unknown[] = [];
@@ -1020,31 +1009,30 @@ export async function registerRoutes(
               item.SoldAsRAM || null,
               item.FreightChargesUSD?.toString() || null,
               item.HDD || null,
-              item.RefurbCostUSD?.toString() || null,
-              item.FinalTotalCostUSD?.toString() || null,
-              item.SoldToParty || null,
-              item.SalesId || null,
-              item.InvoicingName || null,
-              item.InvoiceDate || null,
-              item.FinalSalesPriceUSD?.toString() || null,
-              item.ProfitUSD?.toString() || null,
-              item.MarginPct?.toString() || null,
-              item.SerialNumModel || null,
+              item.COACostUSD?.toString() || null,
+              item.ManufacturerSerialNum || null,
+              item.SupplierPalletNum || null,
+              item.ResourceCostUSD?.toString() || null,
+              item.CustomsDutyUSD?.toString() || null,
+              item.Resolution || null,
               item.ModelNum || null,
+              item.InvoiceAccount || null,
+              item.TotalCostCurUSD?.toString() || null,
+              item.SalesOrderDate || null,
+              item.CustomerRef || null,
+              item.CRMRef || null,
+              item.InvoicingName || null,
               item.TransType || null,
-              item.WarrantyCostUSD?.toString() || null,
-              item.CableCostUSD?.toString() || null,
-              item.LogisticsCostUSD?.toString() || null,
-              item.TestingCostUSD?.toString() || null,
-              item.DataEraseCostUSD?.toString() || null,
-              item.LabourCostUSD?.toString() || null,
-              item.AuctionChargesUSD?.toString() || null,
-              item.RepairRefurbCostUSD?.toString() || null,
-              item.SourcingFeeUSD?.toString() || null,
-              item.TotalWeightKg?.toString() || null,
-              item.RecycledContentPct?.toString() || null,
-              item.CarbonFootprintKg?.toString() || null,
-              item.TradeInGrade || null,
+              item.SalesInvoiceId || null,
+              item.SalesId || null,
+              item.InvoiceDate || null,
+              item.APINNumber || null,
+              item.Segregation || null,
+              item.FinalSalesPriceUSD?.toString() || null,
+              item.FinalTotalCostUSD?.toString() || null,
+              item.OrderTaker || null,
+              item.OrderResponsible || null,
+              item.ProductSpecification || null,
               item.WarrantyStartDate || null,
               item.WarrantyEndDate || null,
               item.WarrantyDescription || null,
@@ -1071,7 +1059,10 @@ export async function registerRoutes(
               invoicing_name = EXCLUDED.invoicing_name,
               invoice_date = EXCLUDED.invoice_date,
               final_sales_price_usd = EXCLUDED.final_sales_price_usd,
-              final_total_cost_usd = EXCLUDED.final_total_cost_usd
+              final_total_cost_usd = EXCLUDED.final_total_cost_usd,
+              model_num = EXCLUDED.model_num,
+              trans_type = EXCLUDED.trans_type,
+              sales_id = EXCLUDED.sales_id
           `;
           
           await pool.query(query, values);
@@ -1082,14 +1073,21 @@ export async function registerRoutes(
         }
         
         // ---- FETCH AND INGEST RETURNS ----
-        console.log("[Refresh] Fetching returns data...");
-        refreshStatus.lastMessage = "Fetching returns data from Azure SQL...";
+        console.log("[Refresh] Fetching returns data via Power Automate...");
+        refreshStatus.lastMessage = "Fetching returns data...";
         
-        const returnsResult = await azurePool.request().query(`
-          SELECT * FROM dbo.RMAView
-        `);
+        const returnsResponse = await fetch(POWER_AUTOMATE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ table: "RMAs", query: "SELECT * FROM RMAs" }),
+        });
         
-        const returnsRows = returnsResult.recordset;
+        if (!returnsResponse.ok) {
+          throw new Error(`Returns fetch failed: ${returnsResponse.status} ${returnsResponse.statusText}`);
+        }
+        
+        const returnsData = await returnsResponse.json();
+        const returnsRows = Array.isArray(returnsData) ? returnsData : (returnsData.value || returnsData.data || []);
         console.log(`[Refresh] Fetched ${returnsRows.length} returns records`);
         refreshStatus.lastMessage = `Ingesting ${returnsRows.length} returns records...`;
         
@@ -1099,16 +1097,15 @@ export async function registerRoutes(
           const batch = returnsRows.slice(i, i + BATCH_SIZE);
           
           const columns = [
-            'rma_line_item_guid', 'rma_header_guid', 'rma_number', 'sales_id',
-            'invent_serial_id', 'item_id', 'item_name', 'model_num', 'make',
-            'category', 'issue_description', 'resolution', 'rma_status',
-            'rma_type', 'rma_reason', 'rma_created_date', 'rma_closed_date',
-            'customer_name', 'customer_id', 'return_ship_date', 'received_date',
-            'replacement_serial_id', 'replacement_item_id', 'refund_amount_usd',
-            'credit_amount_usd', 'repair_cost_usd', 'shipping_cost_usd',
-            'restocking_fee_usd', 'warranty_claim', 'warranty_status',
-            'quality_issue', 'defect_code', 'fault_found', 'test_result',
-            'data_area_id'
+            'final_customer', 'related_order_name', 'case_id', 'rma_number',
+            'reason_for_return', 'created_on', 'warehouse_notes', 'final_reseller_name',
+            'expected_shipping_date', 'rma_line_item_guid', 'rma_line_name', 'case_end_user',
+            'uae_warehouse_notes', 'notes_description', 'rma_guid', 'related_serial_guid',
+            'modified_on', 'opportunity_number', 'item_testing_date', 'final_distributor_name',
+            'case_customer', 'item_received_date', 'case_description', 'dispatch_date',
+            'replacement_serial_guid', 'rma_status', 'type_of_unit', 'line_status',
+            'line_solution', 'uae_final_outcome', 'rma_topic_label', 'uk_final_outcome',
+            'serial_id', 'area_id', 'item_id'
           ];
           
           const values: unknown[] = [];
@@ -1117,41 +1114,41 @@ export async function registerRoutes(
           
           for (const item of batch) {
             const rowValues = [
-              item.RMALineItemGUID || null,
-              item.RMAHeaderGUID || null,
+              item.FinalCustomer || null,
+              item.RelatedOrderName || null,
+              item.CaseID || null,
               item.RMANumber || null,
-              item.SalesId || null,
-              item.InventSerialId || null,
-              item.ItemId || null,
-              item.ItemName || null,
-              item.ModelNum || null,
-              item.Make || null,
-              item.Category || null,
-              item.IssueDescription || null,
-              item.Resolution || null,
+              item.ReasonforReturn || null,
+              item.CreatedOn || null,
+              item.WarehouseNotes || null,
+              item.FinalResellerName || null,
+              item.ExpectedShippingDate || null,
+              item.RMALineItemGUID || null,
+              item.RMALineName || null,
+              item.CaseEndUser || null,
+              item.UAEWarehosueNotes || null,
+              item.NotesDescription || null,
+              item.RMAGUID || null,
+              item.RelatedSerialGUID || null,
+              item.ModifiedOn || null,
+              item.OpportunityNumber || null,
+              item.ItemTestingDate || null,
+              item.FinalDistributorName || null,
+              item.CaseCustomer || null,
+              item.ItemReceivedDate || null,
+              item.CaseDescription || null,
+              item.DispatchDate || null,
+              item.ReplacementSerialGUID || null,
               item.RMAStatus || null,
-              item.RMAType || null,
-              item.RMAReason || null,
-              item.RMACreatedDate || null,
-              item.RMAClosedDate || null,
-              item.CustomerName || null,
-              item.CustomerId || null,
-              item.ReturnShipDate || null,
-              item.ReceivedDate || null,
-              item.ReplacementSerialId || null,
-              item.ReplacementItemId || null,
-              item.RefundAmountUSD?.toString() || null,
-              item.CreditAmountUSD?.toString() || null,
-              item.RepairCostUSD?.toString() || null,
-              item.ShippingCostUSD?.toString() || null,
-              item.RestockingFeeUSD?.toString() || null,
-              item.WarrantyClaim || null,
-              item.WarrantyStatus || null,
-              item.QualityIssue || null,
-              item.DefectCode || null,
-              item.FaultFound || null,
-              item.TestResult || null,
-              item.dataAreaId || null,
+              item.TypeOfUnit || null,
+              item.LineStatus || null,
+              item.LineSolution || null,
+              item.UAEFinalOutcome || null,
+              item.RMATopicLabel || null,
+              item.UKFinalOutcome || null,
+              item.SerialID || null,
+              item.AreaID || null,
+              item.ItemID || null,
             ];
             
             values.push(...rowValues);
@@ -1164,14 +1161,13 @@ export async function registerRoutes(
             VALUES ${valuePlaceholders.join(', ')}
             ON CONFLICT (rma_line_item_guid) DO UPDATE SET
               rma_status = EXCLUDED.rma_status,
-              resolution = EXCLUDED.resolution,
-              rma_closed_date = EXCLUDED.rma_closed_date,
-              refund_amount_usd = EXCLUDED.refund_amount_usd,
-              credit_amount_usd = EXCLUDED.credit_amount_usd,
-              repair_cost_usd = EXCLUDED.repair_cost_usd,
-              warranty_status = EXCLUDED.warranty_status,
-              fault_found = EXCLUDED.fault_found,
-              test_result = EXCLUDED.test_result
+              line_status = EXCLUDED.line_status,
+              line_solution = EXCLUDED.line_solution,
+              modified_on = EXCLUDED.modified_on,
+              dispatch_date = EXCLUDED.dispatch_date,
+              item_received_date = EXCLUDED.item_received_date,
+              uae_final_outcome = EXCLUDED.uae_final_outcome,
+              uk_final_outcome = EXCLUDED.uk_final_outcome
           `;
           
           await pool.query(query, values);
@@ -1223,11 +1219,6 @@ export async function registerRoutes(
           recordsCount: 0,
           status: "error",
         });
-        
-      } finally {
-        if (azurePool) {
-          await azurePool.close();
-        }
       }
     })();
   });
