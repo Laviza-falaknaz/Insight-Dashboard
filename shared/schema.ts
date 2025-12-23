@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, numeric, date, integer, serial, timestamp, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, numeric, date, integer, serial, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -92,6 +92,7 @@ export const inventory = pgTable("inventory", {
   warrantyDescription: text("warranty_description"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
+  inventSerialIdUnique: uniqueIndex("inventory_invent_serial_id_unique").on(table.inventSerialId),
   invoiceDateIdx: index("inventory_invoice_date_idx").on(table.invoiceDate),
   statusIdx: index("inventory_status_idx").on(table.status),
   categoryIdx: index("inventory_category_idx").on(table.category),
@@ -104,10 +105,65 @@ export const insertInventorySchema = createInsertSchema(inventory).omit({ id: tr
 export type InsertInventory = z.infer<typeof insertInventorySchema>;
 export type Inventory = typeof inventory.$inferSelect;
 
+// Returns table for RMA/returns tracking
+export const returns = pgTable("returns", {
+  id: serial("id").primaryKey(),
+  finalCustomer: text("final_customer"),
+  relatedOrderName: text("related_order_name"),
+  caseId: text("case_id"),
+  rmaNumber: text("rma_number"),
+  reasonForReturn: text("reason_for_return"),
+  createdOn: text("created_on"),
+  warehouseNotes: text("warehouse_notes"),
+  finalResellerName: text("final_reseller_name"),
+  expectedShippingDate: text("expected_shipping_date"),
+  rmaLineItemGuid: text("rma_line_item_guid"),
+  rmaLineName: text("rma_line_name"),
+  caseEndUser: text("case_end_user"),
+  uaeWarehouseNotes: text("uae_warehouse_notes"),
+  notesDescription: text("notes_description"),
+  rmaGuid: text("rma_guid"),
+  relatedSerialGuid: text("related_serial_guid"),
+  modifiedOn: text("modified_on"),
+  opportunityNumber: text("opportunity_number"),
+  itemTestingDate: text("item_testing_date"),
+  finalDistributorName: text("final_distributor_name"),
+  caseCustomer: text("case_customer"),
+  itemReceivedDate: text("item_received_date"),
+  caseDescription: text("case_description"),
+  dispatchDate: text("dispatch_date"),
+  replacementSerialGuid: text("replacement_serial_guid"),
+  rmaStatus: text("rma_status"),
+  typeOfUnit: text("type_of_unit"),
+  lineStatus: text("line_status"),
+  lineSolution: text("line_solution"),
+  uaeFinalOutcome: text("uae_final_outcome"),
+  rmaTopicLabel: text("rma_topic_label"),
+  ukFinalOutcome: text("uk_final_outcome"),
+  serialId: text("serial_id"),
+  areaId: text("area_id"),
+  itemId: text("item_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  rmaLineItemGuidUnique: uniqueIndex("returns_rma_line_item_guid_unique").on(table.rmaLineItemGuid),
+  rmaNumberIdx: index("returns_rma_number_idx").on(table.rmaNumber),
+  rmaStatusIdx: index("returns_rma_status_idx").on(table.rmaStatus),
+  createdOnIdx: index("returns_created_on_idx").on(table.createdOn),
+  serialIdIdx: index("returns_serial_id_idx").on(table.serialId),
+}));
+
+export const insertReturnsSchema = createInsertSchema(returns).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertReturns = z.infer<typeof insertReturnsSchema>;
+export type Returns = typeof returns.$inferSelect;
+
 // Data upload tracking
 export const dataUploads = pgTable("data_uploads", {
   id: serial("id").primaryKey(),
+  tableName: text("table_name").notNull().default("inventory"),
   recordsCount: integer("records_count").notNull(),
+  insertedCount: integer("inserted_count").default(0),
+  updatedCount: integer("updated_count").default(0),
   status: text("status").notNull().default("completed"),
   uploadedAt: timestamp("uploaded_at").defaultNow(),
 });
