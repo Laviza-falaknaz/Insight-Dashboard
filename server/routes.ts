@@ -314,7 +314,7 @@ export async function registerRoutes(
       }).from(inventory)
         .where(whereCondition)
         .groupBy(inventory.category)
-        .orderBy(sql`revenue DESC`);
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`));
 
       const categoryBreakdown: CategoryBreakdown[] = categoryResult.map(c => ({
         category: c.category || "Unknown",
@@ -334,7 +334,7 @@ export async function registerRoutes(
       }).from(inventory)
         .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, ""), whereCondition))
         .groupBy(inventory.invoicingName)
-        .orderBy(sql`revenue DESC`)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(10);
 
       const topCustomers: TopPerformer[] = customerResult.map(c => ({
@@ -355,7 +355,7 @@ export async function registerRoutes(
       }).from(inventory)
         .where(whereCondition)
         .groupBy(inventory.make, inventory.modelNum)
-        .orderBy(sql`revenue DESC`)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(10);
 
       const topProducts: TopPerformer[] = productResult.map(p => ({
@@ -375,7 +375,7 @@ export async function registerRoutes(
       }).from(inventory)
         .where(and(isNotNull(inventory.vendName), ne(inventory.vendName, ""), whereCondition))
         .groupBy(inventory.vendName)
-        .orderBy(sql`revenue DESC`)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(10);
 
       const topVendors: TopPerformer[] = vendorResult.map(v => ({
@@ -389,29 +389,29 @@ export async function registerRoutes(
       // Get status breakdown
       const statusResult = await db.select({
         status: inventory.status,
-        count: count(),
+        statusCount: count(),
       }).from(inventory)
         .where(whereCondition)
         .groupBy(inventory.status)
-        .orderBy(sql`count DESC`);
+        .orderBy(desc(count()));
 
       const statusBreakdown = statusResult.map(s => ({
         status: s.status || "Unknown",
-        count: Number(s.count),
+        count: Number(s.statusCount),
       }));
 
       // Get grade breakdown
       const gradeResult = await db.select({
         grade: inventory.gradeCondition,
-        count: count(),
+        gradeCount: count(),
       }).from(inventory)
         .where(whereCondition)
         .groupBy(inventory.gradeCondition)
-        .orderBy(sql`count DESC`);
+        .orderBy(desc(count()));
 
       const gradeBreakdown = gradeResult.map(g => ({
         grade: g.grade || "Unknown",
-        count: Number(g.count),
+        count: Number(g.gradeCount),
       }));
 
       const dashboardData: DashboardData = {
@@ -444,7 +444,7 @@ export async function registerRoutes(
       }).from(inventory)
         .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
         .groupBy(inventory.invoicingName)
-        .orderBy(sql`revenue DESC`)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(50);
 
       const totals = await db.select({
@@ -485,7 +485,7 @@ export async function registerRoutes(
         units: count(),
       }).from(inventory)
         .groupBy(inventory.make, inventory.modelNum)
-        .orderBy(sql`revenue DESC`)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(50);
 
       const categoryBreakdown = await db.select({
@@ -495,7 +495,7 @@ export async function registerRoutes(
         units: count(),
       }).from(inventory)
         .groupBy(inventory.category)
-        .orderBy(sql`revenue DESC`);
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`));
 
       const totals = await db.select({
         totalProducts: sql<number>`COUNT(DISTINCT CONCAT(${inventory.make}, ${inventory.modelNum}))`,
