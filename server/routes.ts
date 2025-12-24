@@ -1829,6 +1829,91 @@ export async function registerRoutes(
         .groupBy(sql`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`));
 
+      // Return-prone products with return rates
+      const returnProneProducts = await pool.query(`
+        WITH product_sales AS (
+          SELECT 
+            CONCAT(UPPER(make), ' ', UPPER(model_num)) as product,
+            COUNT(*) as units_sold,
+            COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+            COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as cost
+          FROM inventory 
+          WHERE trans_type = 'SalesOrder'
+          GROUP BY CONCAT(UPPER(make), ' ', UPPER(model_num))
+          HAVING COUNT(*) >= 5
+        ),
+        product_returns AS (
+          SELECT 
+            CONCAT(UPPER(i.make), ' ', UPPER(i.model_num)) as product,
+            COUNT(DISTINCT i.id) as return_count,
+            COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric) - CAST(i.final_total_cost_usd AS numeric)), 0) as profit_lost
+          FROM inventory i
+          INNER JOIN returns r ON 
+            i.invent_serial_id = r.serial_id AND
+            i.data_area_id = r.area_id AND
+            i.item_id = r.item_id
+          WHERE i.trans_type = 'SalesOrder'
+          GROUP BY CONCAT(UPPER(i.make), ' ', UPPER(i.model_num))
+        )
+        SELECT 
+          ps.product,
+          ps.units_sold,
+          ps.revenue,
+          ps.revenue - ps.cost as profit,
+          CASE WHEN ps.revenue > 0 THEN ((ps.revenue - ps.cost) / ps.revenue) * 100 ELSE 0 END as margin,
+          COALESCE(pr.return_count, 0) as return_count,
+          CASE WHEN ps.units_sold > 0 THEN (COALESCE(pr.return_count, 0)::float / ps.units_sold) * 100 ELSE 0 END as return_rate,
+          COALESCE(pr.profit_lost, 0) as profit_lost
+        FROM product_sales ps
+        LEFT JOIN product_returns pr ON ps.product = pr.product
+        WHERE COALESCE(pr.return_count, 0) > 0
+        ORDER BY return_rate DESC, return_count DESC
+        LIMIT 15
+      `);
+
+      // Products with cost breakdown
+      const productCostBreakdown = await pool.query(`
+        SELECT 
+          CONCAT(UPPER(make), ' ', UPPER(model_num)) as product,
+          COUNT(*) as units,
+          COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+          COALESCE(SUM(CAST(purch_price_usd AS numeric)), 0) as purchase_cost,
+          COALESCE(SUM(CAST(parts_cost_usd AS numeric)), 0) as parts_cost,
+          COALESCE(SUM(CAST(freight_charges_usd AS numeric)), 0) as freight_cost,
+          COALESCE(SUM(CAST(resource_cost_usd AS numeric)) + SUM(CAST(standardisation_cost_usd AS numeric)), 0) as labor_cost,
+          COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as total_cost,
+          CASE WHEN SUM(CAST(final_sales_price_usd AS numeric)) > 0 
+            THEN ((SUM(CAST(final_sales_price_usd AS numeric)) - SUM(CAST(final_total_cost_usd AS numeric))) / 
+                  SUM(CAST(final_sales_price_usd AS numeric))) * 100 
+            ELSE 0 END as margin
+        FROM inventory 
+        WHERE trans_type = 'SalesOrder'
+        GROUP BY CONCAT(UPPER(make), ' ', UPPER(model_num))
+        HAVING COUNT(*) >= 5
+        ORDER BY revenue DESC
+        LIMIT 20
+      `);
+
+      // Negative margin products (losing money)
+      const negativeMarginProducts = await pool.query(`
+        SELECT 
+          CONCAT(UPPER(make), ' ', UPPER(model_num)) as product,
+          COUNT(*) as units,
+          COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+          COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as cost,
+          COALESCE(SUM(CAST(final_sales_price_usd AS numeric)) - SUM(CAST(final_total_cost_usd AS numeric)), 0) as profit,
+          CASE WHEN SUM(CAST(final_sales_price_usd AS numeric)) > 0 
+            THEN ((SUM(CAST(final_sales_price_usd AS numeric)) - SUM(CAST(final_total_cost_usd AS numeric))) / 
+                  SUM(CAST(final_sales_price_usd AS numeric))) * 100 
+            ELSE 0 END as margin
+        FROM inventory 
+        WHERE trans_type = 'SalesOrder'
+        GROUP BY CONCAT(UPPER(make), ' ', UPPER(model_num))
+        HAVING SUM(CAST(final_sales_price_usd AS numeric)) - SUM(CAST(final_total_cost_usd AS numeric)) < 0
+        ORDER BY profit ASC
+        LIMIT 15
+      `);
+
       res.json({
         totalProducts,
         totalRevenue,
@@ -1870,7 +1955,38 @@ export async function registerRoutes(
           revenue: Number(c.revenue),
           units: Number(c.units),
         })),
-        slowMovers: [], // Would need inventory age tracking
+        slowMovers: [],
+        
+        // Strategic product insights
+        returnProneProducts: returnProneProducts.rows.map(p => ({
+          product: p.product,
+          unitsSold: parseInt(p.units_sold),
+          revenue: parseFloat(p.revenue),
+          profit: parseFloat(p.profit),
+          margin: parseFloat(p.margin),
+          returnCount: parseInt(p.return_count),
+          returnRate: parseFloat(p.return_rate),
+          profitLost: parseFloat(p.profit_lost),
+        })),
+        productCostBreakdown: productCostBreakdown.rows.map(p => ({
+          product: p.product,
+          units: parseInt(p.units),
+          revenue: parseFloat(p.revenue),
+          purchaseCost: parseFloat(p.purchase_cost),
+          partsCost: parseFloat(p.parts_cost),
+          freightCost: parseFloat(p.freight_cost),
+          laborCost: parseFloat(p.labor_cost),
+          totalCost: parseFloat(p.total_cost),
+          margin: parseFloat(p.margin),
+        })),
+        negativeMarginProducts: negativeMarginProducts.rows.map(p => ({
+          product: p.product,
+          units: parseInt(p.units),
+          revenue: parseFloat(p.revenue),
+          cost: parseFloat(p.cost),
+          profit: parseFloat(p.profit),
+          margin: parseFloat(p.margin),
+        })),
       });
     } catch (error) {
       console.error("Error fetching product analysis:", error);
@@ -2282,6 +2398,127 @@ export async function registerRoutes(
         LIMIT 12
       `, params);
 
+      // Returns analysis - Reasons breakdown
+      const returnsReasons = await pool.query(`
+        SELECT 
+          COALESCE(UPPER(NULLIF(r.reason_for_return, '')), 'NOT SPECIFIED') as reason,
+          COUNT(*) as count,
+          COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric)), 0) as revenue_impact,
+          COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric) - CAST(i.final_total_cost_usd AS numeric)), 0) as profit_impact
+        FROM returns r
+        INNER JOIN inventory i ON 
+          i.invent_serial_id = r.serial_id AND
+          i.data_area_id = r.area_id AND
+          i.item_id = r.item_id
+        WHERE ${whereClauseAliased}
+        GROUP BY COALESCE(UPPER(NULLIF(r.reason_for_return, '')), 'NOT SPECIFIED')
+        ORDER BY count DESC
+        LIMIT 10
+      `, params);
+
+      // Returns by category - which categories have most returns
+      const returnsByCategory = await pool.query(`
+        SELECT 
+          UPPER(COALESCE(i.category, 'UNKNOWN')) as category,
+          COUNT(DISTINCT i.id) as return_count,
+          COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric)), 0) as revenue_at_risk,
+          COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric) - CAST(i.final_total_cost_usd AS numeric)), 0) as profit_lost
+        FROM inventory i
+        INNER JOIN returns r ON 
+          i.invent_serial_id = r.serial_id AND
+          i.data_area_id = r.area_id AND
+          i.item_id = r.item_id
+        WHERE ${whereClauseAliased}
+        GROUP BY UPPER(COALESCE(i.category, 'UNKNOWN'))
+        ORDER BY return_count DESC
+        LIMIT 10
+      `, params);
+
+      // Returns by status/solution - what happens to returned items
+      const returnsSolutions = await pool.query(`
+        SELECT 
+          COALESCE(UPPER(NULLIF(r.line_solution, '')), 'PENDING') as solution,
+          COUNT(*) as count,
+          COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric)), 0) as value
+        FROM returns r
+        INNER JOIN inventory i ON 
+          i.invent_serial_id = r.serial_id AND
+          i.data_area_id = r.area_id AND
+          i.item_id = r.item_id
+        WHERE ${whereClauseAliased}
+        GROUP BY COALESCE(UPPER(NULLIF(r.line_solution, '')), 'PENDING')
+        ORDER BY count DESC
+      `, params);
+
+      // Cost bottleneck analysis - which cost categories eat into margins
+      const costBottlenecks = await pool.query(`
+        SELECT 
+          UPPER(COALESCE(category, 'UNKNOWN')) as category,
+          COUNT(*) as units,
+          COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+          COALESCE(SUM(CAST(purch_price_usd AS numeric)), 0) as purchase_cost,
+          COALESCE(SUM(CAST(parts_cost_usd AS numeric)), 0) as parts_cost,
+          COALESCE(SUM(CAST(freight_charges_usd AS numeric)), 0) as freight_cost,
+          COALESCE(SUM(CAST(resource_cost_usd AS numeric)) + 
+            SUM(CAST(standardisation_cost_usd AS numeric)), 0) as labor_cost,
+          COALESCE(SUM(CAST(packaging_cost_usd AS numeric)), 0) as packaging_cost,
+          COALESCE(SUM(CAST(misc_cost_usd AS numeric)) + 
+            SUM(CAST(consumable_cost_usd AS numeric)) + 
+            SUM(CAST(battery_cost_usd AS numeric)) + 
+            SUM(CAST(lcd_cost_usd AS numeric)) + 
+            SUM(CAST(coa_cost_usd AS numeric)), 0) as other_costs,
+          COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as total_cost,
+          CASE WHEN SUM(CAST(final_sales_price_usd AS numeric)) > 0 
+            THEN ((SUM(CAST(final_sales_price_usd AS numeric)) - SUM(CAST(final_total_cost_usd AS numeric))) / 
+                  SUM(CAST(final_sales_price_usd AS numeric))) * 100 
+            ELSE 0 END as margin
+        FROM inventory 
+        WHERE ${whereClause}
+        GROUP BY UPPER(COALESCE(category, 'UNKNOWN'))
+        ORDER BY revenue DESC
+        LIMIT 15
+      `, params);
+
+      // High-cost products - products where costs significantly impact margin
+      const highCostProducts = await pool.query(`
+        SELECT 
+          CONCAT(make, ' ', model_num) as product,
+          COUNT(*) as units,
+          COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+          COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as total_cost,
+          CASE WHEN SUM(CAST(final_sales_price_usd AS numeric)) > 0 
+            THEN (SUM(CAST(final_total_cost_usd AS numeric)) / SUM(CAST(final_sales_price_usd AS numeric))) * 100 
+            ELSE 0 END as cost_ratio,
+          CASE WHEN SUM(CAST(final_sales_price_usd AS numeric)) > 0 
+            THEN ((SUM(CAST(final_sales_price_usd AS numeric)) - SUM(CAST(final_total_cost_usd AS numeric))) / 
+                  SUM(CAST(final_sales_price_usd AS numeric))) * 100 
+            ELSE 0 END as margin
+        FROM inventory 
+        WHERE ${whereClause}
+        GROUP BY CONCAT(make, ' ', model_num)
+        HAVING COUNT(*) >= 10
+        ORDER BY cost_ratio DESC
+        LIMIT 10
+      `, params);
+
+      // Warranty analysis - products under warranty
+      const warrantyAnalysis = await pool.query(`
+        SELECT 
+          COUNT(CASE WHEN warranty_end_date IS NOT NULL AND warranty_end_date != '' 
+            AND warranty_end_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            AND TO_DATE(warranty_end_date, 'YYYY-MM-DD') >= CURRENT_DATE THEN 1 END) as under_warranty,
+          COUNT(CASE WHEN warranty_end_date IS NOT NULL AND warranty_end_date != '' 
+            AND warranty_end_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            AND TO_DATE(warranty_end_date, 'YYYY-MM-DD') >= CURRENT_DATE 
+            AND TO_DATE(warranty_end_date, 'YYYY-MM-DD') < CURRENT_DATE + INTERVAL '30 days' THEN 1 END) as expiring_soon,
+          COALESCE(SUM(CASE WHEN warranty_end_date IS NOT NULL AND warranty_end_date != '' 
+            AND warranty_end_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            AND TO_DATE(warranty_end_date, 'YYYY-MM-DD') >= CURRENT_DATE 
+            THEN CAST(final_sales_price_usd AS numeric) ELSE 0 END), 0) as warranty_value
+        FROM inventory 
+        WHERE ${whereClause}
+      `, params);
+
       // Generate critical alerts
       const criticalAlerts: any[] = [];
 
@@ -2381,6 +2618,55 @@ export async function registerRoutes(
           margin: parseFloat(m.margin),
           returnRate: parseFloat(m.return_rate),
         })).reverse(),
+        
+        // Returns & Warranty Analysis
+        returnsAnalysis: {
+          reasonsBreakdown: returnsReasons.rows.map(r => ({
+            reason: r.reason,
+            count: parseInt(r.count),
+            revenueImpact: parseFloat(r.revenue_impact),
+            profitImpact: parseFloat(r.profit_impact),
+          })),
+          byCategory: returnsByCategory.rows.map(c => ({
+            category: c.category,
+            returnCount: parseInt(c.return_count),
+            revenueAtRisk: parseFloat(c.revenue_at_risk),
+            profitLost: parseFloat(c.profit_lost),
+          })),
+          solutionsBreakdown: returnsSolutions.rows.map(s => ({
+            solution: s.solution,
+            count: parseInt(s.count),
+            value: parseFloat(s.value),
+          })),
+        },
+        warrantyExposure: {
+          underWarranty: parseInt(warrantyAnalysis.rows[0]?.under_warranty) || 0,
+          expiringSoon: parseInt(warrantyAnalysis.rows[0]?.expiring_soon) || 0,
+          warrantyValue: parseFloat(warrantyAnalysis.rows[0]?.warranty_value) || 0,
+        },
+        
+        // Cost Bottleneck Analysis
+        costBottlenecks: costBottlenecks.rows.map(c => ({
+          category: c.category,
+          units: parseInt(c.units),
+          revenue: parseFloat(c.revenue),
+          purchaseCost: parseFloat(c.purchase_cost),
+          partsCost: parseFloat(c.parts_cost),
+          freightCost: parseFloat(c.freight_cost),
+          laborCost: parseFloat(c.labor_cost),
+          packagingCost: parseFloat(c.packaging_cost),
+          otherCosts: parseFloat(c.other_costs),
+          totalCost: parseFloat(c.total_cost),
+          margin: parseFloat(c.margin),
+        })),
+        highCostProducts: highCostProducts.rows.map(p => ({
+          product: p.product,
+          units: parseInt(p.units),
+          revenue: parseFloat(p.revenue),
+          totalCost: parseFloat(p.total_cost),
+          costRatio: parseFloat(p.cost_ratio),
+          margin: parseFloat(p.margin),
+        })),
       });
     } catch (error) {
       console.error("Error fetching strategic dashboard:", error);

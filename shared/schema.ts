@@ -514,6 +514,37 @@ export interface ProductAnalysis {
   topByVolume: { product: string; make: string; units: number; revenue: number }[];
   productsByCategory: { category: string; products: number; revenue: number; units: number }[];
   slowMovers: { product: string; daysInStock: number; value: number; units: number }[];
+  
+  // Strategic product insights
+  returnProneProducts?: {
+    product: string;
+    unitsSold: number;
+    revenue: number;
+    profit: number;
+    margin: number;
+    returnCount: number;
+    returnRate: number;
+    profitLost: number;
+  }[];
+  productCostBreakdown?: {
+    product: string;
+    units: number;
+    revenue: number;
+    purchaseCost: number;
+    partsCost: number;
+    freightCost: number;
+    laborCost: number;
+    totalCost: number;
+    margin: number;
+  }[];
+  negativeMarginProducts?: {
+    product: string;
+    units: number;
+    revenue: number;
+    cost: number;
+    profit: number;
+    margin: number;
+  }[];
 }
 
 // Executive Summary Dashboard
@@ -828,5 +859,40 @@ export interface StrategicDashboardData {
     profit: number;
     margin: number;
     returnRate: number;
+  }[];
+  
+  // Returns & Warranty Analysis
+  returnsAnalysis?: {
+    reasonsBreakdown: { reason: string; count: number; revenueImpact: number; profitImpact: number }[];
+    byCategory: { category: string; returnCount: number; revenueAtRisk: number; profitLost: number }[];
+    solutionsBreakdown: { solution: string; count: number; value: number }[];
+  };
+  warrantyExposure?: {
+    underWarranty: number;
+    expiringSoon: number;
+    warrantyValue: number;
+  };
+  
+  // Cost Bottleneck Analysis
+  costBottlenecks?: {
+    category: string;
+    units: number;
+    revenue: number;
+    purchaseCost: number;
+    partsCost: number;
+    freightCost: number;
+    laborCost: number;
+    packagingCost: number;
+    otherCosts: number;
+    totalCost: number;
+    margin: number;
+  }[];
+  highCostProducts?: {
+    product: string;
+    units: number;
+    revenue: number;
+    totalCost: number;
+    costRatio: number;
+    margin: number;
   }[];
 }

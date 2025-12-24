@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Package, DollarSign, TrendingUp, Boxes } from "lucide-react";
+import { Package, DollarSign, TrendingUp, Boxes, AlertTriangle, RotateCcw } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -280,6 +280,157 @@ export default function Products() {
           ) : (
             <p className="text-sm text-muted-foreground text-center py-4">
               No product data available
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <RotateCcw className="h-4 w-4 text-amber-500" />
+              Return-Prone Products
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <Skeleton className="h-48 w-full" />
+            ) : (productData?.returnProneProducts?.length || 0) > 0 ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead>Product</TableHead>
+                      <TableHead className="text-right">Sold</TableHead>
+                      <TableHead className="text-right">Returns</TableHead>
+                      <TableHead className="text-right">Return Rate</TableHead>
+                      <TableHead className="text-right">Lost Profit</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {productData?.returnProneProducts?.slice(0, 10).map((p, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell className="font-medium max-w-[150px] truncate" title={p.product}>{p.product}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{p.unitsSold}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-amber-600">{p.returnCount}</TableCell>
+                        <TableCell className="text-right">
+                          <Badge variant={p.returnRate > 5 ? 'destructive' : 'secondary'}>
+                            {formatPercent(p.returnRate)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm text-red-500">
+                          -{formatCurrency(Math.abs(p.profitLost))}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No return data available
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-red-500" />
+              Negative Margin Products
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <Skeleton className="h-48 w-full" />
+            ) : (productData?.negativeMarginProducts?.length || 0) > 0 ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead>Product</TableHead>
+                      <TableHead className="text-right">Units</TableHead>
+                      <TableHead className="text-right">Revenue</TableHead>
+                      <TableHead className="text-right">Cost</TableHead>
+                      <TableHead className="text-right">Loss</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {productData?.negativeMarginProducts?.slice(0, 10).map((p, idx) => (
+                      <TableRow key={idx} className="bg-red-500/5">
+                        <TableCell className="font-medium max-w-[150px] truncate" title={p.product}>{p.product}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{p.units}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{formatCurrency(p.revenue)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{formatCurrency(p.cost)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-red-600 font-bold">
+                          {formatCurrency(p.profit)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="py-4 text-center">
+                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
+                  All products are profitable
+                </Badge>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-medium flex items-center gap-2">
+            <DollarSign className="h-4 w-4 text-blue-500" />
+            Product Cost Breakdown
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <Skeleton className="h-48 w-full" />
+          ) : (productData?.productCostBreakdown?.length || 0) > 0 ? (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead>Product</TableHead>
+                    <TableHead className="text-right">Revenue</TableHead>
+                    <TableHead className="text-right">Purchase</TableHead>
+                    <TableHead className="text-right">Parts</TableHead>
+                    <TableHead className="text-right">Freight</TableHead>
+                    <TableHead className="text-right">Labor</TableHead>
+                    <TableHead className="text-right">Total Cost</TableHead>
+                    <TableHead className="text-right">Margin</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {productData?.productCostBreakdown?.slice(0, 15).map((p, idx) => (
+                    <TableRow key={idx}>
+                      <TableCell className="font-medium max-w-[120px] truncate" title={p.product}>{p.product}</TableCell>
+                      <TableCell className="text-right font-mono text-xs">{formatCurrency(p.revenue)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">{formatCurrency(p.purchaseCost)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">{formatCurrency(p.partsCost)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">{formatCurrency(p.freightCost)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">{formatCurrency(p.laborCost)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs font-medium">{formatCurrency(p.totalCost)}</TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant={p.margin >= 30 ? 'default' : p.margin >= 15 ? 'secondary' : 'destructive'}>
+                          {formatPercent(p.margin)}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No cost breakdown data available
             </p>
           )}
         </CardContent>

@@ -28,6 +28,8 @@ import { RegionalPerformance } from "@/components/charts/regional-performance";
 import { CriticalAlerts } from "@/components/charts/critical-alerts";
 import { PerformanceSummary } from "@/components/charts/performance-summary";
 import { MonthlyTrendsChart } from "@/components/charts/monthly-trends-chart";
+import { ReturnsAnalysisCard } from "@/components/charts/returns-analysis-card";
+import { CostBottleneckCard } from "@/components/charts/cost-bottleneck-card";
 import type { FilterDropdownOptions, FilterOptions, StrategicDashboardData } from "@shared/schema";
 
 interface DateRange {
@@ -312,6 +314,23 @@ export default function Dashboard() {
         />
       </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ReturnsAnalysisCard
+          returnsAnalysis={strategicData?.returnsAnalysis}
+          warrantyExposure={strategicData?.warrantyExposure}
+          totalUnitsReturned={strategicData?.unitsReturned || 0}
+          isLoading={strategicLoading}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <CostBottleneckCard
+          costBottlenecks={strategicData?.costBottlenecks}
+          highCostProducts={strategicData?.highCostProducts}
+          isLoading={strategicLoading}
+        />
+      </div>
+
       <div id="dashboard-trends">
         <MonthlyTrendsChart 
           data={strategicData?.monthlyTrends || []} 
@@ -321,7 +340,7 @@ export default function Dashboard() {
 
       {strategicData && (
         <AIInsightsPanel
-          context="strategic_dashboard"
+          context="executive_summary"
           data={strategicData}
           title="AI Strategic Insights"
         />

@@ -71,3 +71,27 @@ shared/           # Shared types and schema
 
 ### Date Handling
 - **date-fns**: Date manipulation and formatting utilities
+
+## Strategic Product Insights
+
+The Products page now includes enhanced strategic analysis:
+
+### Return-Prone Products
+- Products with highest return rates
+- Return count and rate per product (%)
+- Profit lost due to returns
+- Joined from inventory SalesOrders to returns table
+
+### Negative Margin Products
+- Products selling at a loss (cost > revenue)
+- Units sold, revenue, cost, and loss amount
+- Critical alerts for profitability issues
+
+### Product Cost Breakdown
+- Per-product cost analysis: purchase, parts, freight, labor
+- Total cost vs revenue with margin calculation
+- Helps identify cost bottlenecks by product
+
+### API Endpoints
+- `GET /api/insights/products` - Returns all product analysis data including strategic insights
+- `GET /api/strategic/dashboard` - Strategic dashboard with returns analysis, warranty exposure, cost bottlenecks
