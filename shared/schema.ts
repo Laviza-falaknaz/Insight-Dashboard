@@ -46,6 +46,7 @@ export const themePresets = {
 } as const;
 
 export type ThemeId = keyof typeof themePresets;
+export type ThemePreset = typeof themePresets[ThemeId];
 
 // Inventory table for local PostgreSQL storage
 export const inventory = pgTable("inventory", {
