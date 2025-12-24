@@ -1978,6 +1978,872 @@ export async function registerRoutes(
   });
 
   // ============================================
+  // STRATEGIC EXECUTIVE INSIGHTS
+  // Leverages inventory-returns relationship:
+  // inventory (invent_serial_id, data_area_id, item_id, crm_ref) 
+  // joins to returns (serial_id, area_id, item_id, sales_order_number)
+  // Only for TransType='SalesOrder'
+  // ============================================
+
+  // Strategic Dashboard - Comprehensive executive view with return impact
+  app.get("/api/strategic/dashboard", async (req: Request, res: Response) => {
+    try {
+      // Parse filter parameters
+      const { startDate, endDate, category, make, customer, vendor, gradeCondition } = req.query;
+      
+      // Build WHERE conditions for filters
+      const conditions: string[] = ["trans_type = 'SalesOrder'"];
+      const params: any[] = [];
+      let paramIdx = 1;
+      
+      if (startDate) {
+        conditions.push(`invoice_date >= $${paramIdx}`);
+        params.push(startDate);
+        paramIdx++;
+      }
+      if (endDate) {
+        conditions.push(`invoice_date <= $${paramIdx}`);
+        params.push(endDate);
+        paramIdx++;
+      }
+      if (category) {
+        const cats = String(category).split(',');
+        conditions.push(`UPPER(category) = ANY($${paramIdx}::text[])`);
+        params.push(cats.map(c => c.toUpperCase()));
+        paramIdx++;
+      }
+      if (make) {
+        const makes = String(make).split(',');
+        conditions.push(`UPPER(make) = ANY($${paramIdx}::text[])`);
+        params.push(makes.map(m => m.toUpperCase()));
+        paramIdx++;
+      }
+      if (customer) {
+        const customers = String(customer).split(',');
+        conditions.push(`UPPER(invoicing_name) = ANY($${paramIdx}::text[])`);
+        params.push(customers.map(c => c.toUpperCase()));
+        paramIdx++;
+      }
+      if (vendor) {
+        const vendors = String(vendor).split(',');
+        conditions.push(`UPPER(vend_name) = ANY($${paramIdx}::text[])`);
+        params.push(vendors.map(v => v.toUpperCase()));
+        paramIdx++;
+      }
+      if (gradeCondition) {
+        const grades = String(gradeCondition).split(',');
+        conditions.push(`UPPER(grade_condition) = ANY($${paramIdx}::text[])`);
+        params.push(grades.map(g => g.toUpperCase()));
+        paramIdx++;
+      }
+      
+      const whereClause = conditions.join(' AND ');
+      
+      // For aliased queries (i.column_name) - derive from base conditions with i. prefix
+      const whereClauseAliased = whereClause
+        .replace(/trans_type/g, 'i.trans_type')
+        .replace(/invoice_date/g, 'i.invoice_date')
+        .replace(/UPPER\(category\)/g, 'UPPER(i.category)')
+        .replace(/UPPER\(make\)/g, 'UPPER(i.make)')
+        .replace(/UPPER\(invoicing_name\)/g, 'UPPER(i.invoicing_name)')
+        .replace(/UPPER\(vend_name\)/g, 'UPPER(i.vend_name)')
+        .replace(/UPPER\(grade_condition\)/g, 'UPPER(i.grade_condition)');
+      
+      // Sales-only metrics (TransType='SalesOrder')
+      const salesMetrics = await pool.query(`
+        SELECT 
+          COUNT(*) as units_sold,
+          COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as total_revenue,
+          COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as total_cost,
+          COALESCE(SUM(CAST(purch_price_usd AS numeric)), 0) as purchase_cost,
+          COALESCE(SUM(CAST(parts_cost_usd AS numeric)), 0) as parts_cost,
+          COALESCE(SUM(CAST(freight_charges_usd AS numeric)), 0) as freight_cost,
+          COALESCE(SUM(CAST(resource_cost_usd AS numeric)), 0) + 
+            COALESCE(SUM(CAST(standardisation_cost_usd AS numeric)), 0) as labor_cost,
+          COALESCE(SUM(CAST(packaging_cost_usd AS numeric)), 0) as packaging_cost,
+          COALESCE(SUM(CAST(misc_cost_usd AS numeric)), 0) + 
+            COALESCE(SUM(CAST(consumable_cost_usd AS numeric)), 0) + 
+            COALESCE(SUM(CAST(battery_cost_usd AS numeric)), 0) + 
+            COALESCE(SUM(CAST(lcd_cost_usd AS numeric)), 0) + 
+            COALESCE(SUM(CAST(coa_cost_usd AS numeric)), 0) as other_costs,
+          COUNT(DISTINCT invoicing_name) as unique_customers,
+          COUNT(DISTINCT model_num) as unique_products
+        FROM inventory 
+        WHERE ${whereClause}
+      `, params);
+
+      const sales = salesMetrics.rows[0];
+      const totalRevenue = parseFloat(sales.total_revenue) || 0;
+      const totalCost = parseFloat(sales.total_cost) || 0;
+      const unitsSold = parseInt(sales.units_sold) || 0;
+      const grossProfit = totalRevenue - totalCost;
+      const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+
+      // Join sales to returns to find units that were returned
+      // Only TransType='SalesOrder' connects to returns
+      const returnsImpact = await pool.query(`
+        SELECT 
+          COUNT(DISTINCT i.id) as units_with_returns,
+          COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric)), 0) as revenue_at_risk,
+          COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric) - CAST(i.final_total_cost_usd AS numeric)), 0) as profit_lost
+        FROM inventory i
+        INNER JOIN returns r ON 
+          i.invent_serial_id = r.serial_id AND
+          i.data_area_id = r.area_id AND
+          i.item_id = r.item_id
+        WHERE ${whereClauseAliased}
+      `, params);
+
+      const returnData = returnsImpact.rows[0];
+      const unitsReturned = parseInt(returnData.units_with_returns) || 0;
+      const revenueAtRisk = parseFloat(returnData.revenue_at_risk) || 0;
+      const profitLost = parseFloat(returnData.profit_lost) || 0;
+      const returnRate = unitsSold > 0 ? (unitsReturned / unitsSold) * 100 : 0;
+      const netProfit = grossProfit - profitLost;
+      const netMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+
+      // Profitability waterfall
+      const purchaseCost = parseFloat(sales.purchase_cost) || 0;
+      const partsCost = parseFloat(sales.parts_cost) || 0;
+      const freightCost = parseFloat(sales.freight_cost) || 0;
+      const laborCost = parseFloat(sales.labor_cost) || 0;
+      const packagingCost = parseFloat(sales.packaging_cost) || 0;
+      const otherCosts = parseFloat(sales.other_costs) || 0;
+
+      // Category performance with return rates
+      const categoryPerf = await pool.query(`
+        WITH sales_data AS (
+          SELECT 
+            UPPER(COALESCE(category, 'UNKNOWN')) as category,
+            COUNT(*) as units,
+            COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+            COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as cost
+          FROM inventory 
+          WHERE ${whereClause}
+          GROUP BY UPPER(COALESCE(category, 'UNKNOWN'))
+        ),
+        return_data AS (
+          SELECT 
+            UPPER(COALESCE(i.category, 'UNKNOWN')) as category,
+            COUNT(DISTINCT i.id) as return_count
+          FROM inventory i
+          INNER JOIN returns r ON 
+            i.invent_serial_id = r.serial_id AND
+            i.data_area_id = r.area_id AND
+            i.item_id = r.item_id
+          WHERE ${whereClauseAliased}
+          GROUP BY UPPER(COALESCE(i.category, 'UNKNOWN'))
+        )
+        SELECT 
+          s.category,
+          s.units,
+          s.revenue,
+          s.cost,
+          s.revenue - s.cost as profit,
+          CASE WHEN s.revenue > 0 THEN ((s.revenue - s.cost) / s.revenue) * 100 ELSE 0 END as margin,
+          COALESCE(r.return_count, 0) as return_count,
+          CASE WHEN s.units > 0 THEN (COALESCE(r.return_count, 0)::float / s.units) * 100 ELSE 0 END as return_rate
+        FROM sales_data s
+        LEFT JOIN return_data r ON s.category = r.category
+        ORDER BY s.revenue - s.cost DESC
+        LIMIT 10
+      `, params);
+
+      const topCategory = categoryPerf.rows[0];
+      const worstCategory = categoryPerf.rows[categoryPerf.rows.length - 1];
+
+      // Top customer
+      const topCustomerResult = await pool.query(`
+        SELECT 
+          UPPER(invoicing_name) as customer,
+          COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+          CASE WHEN SUM(CAST(final_sales_price_usd AS numeric)) > 0 
+            THEN ((SUM(CAST(final_sales_price_usd AS numeric)) - SUM(CAST(final_total_cost_usd AS numeric))) / 
+                  SUM(CAST(final_sales_price_usd AS numeric))) * 100 
+            ELSE 0 END as margin
+        FROM inventory 
+        WHERE ${whereClause} AND invoicing_name IS NOT NULL AND invoicing_name != ''
+        GROUP BY UPPER(invoicing_name)
+        ORDER BY revenue DESC
+        LIMIT 1
+      `, params);
+
+      // Highest return rate product
+      const highReturnProduct = await pool.query(`
+        WITH product_sales AS (
+          SELECT 
+            CONCAT(make, ' ', model_num) as product,
+            COUNT(*) as units,
+            COALESCE(SUM(CAST(final_sales_price_usd AS numeric) - CAST(final_total_cost_usd AS numeric)), 0) as profit
+          FROM inventory 
+          WHERE ${whereClause}
+          GROUP BY CONCAT(make, ' ', model_num)
+          HAVING COUNT(*) >= 5
+        ),
+        product_returns AS (
+          SELECT 
+            CONCAT(i.make, ' ', i.model_num) as product,
+            COUNT(DISTINCT i.id) as return_count,
+            COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric) - CAST(i.final_total_cost_usd AS numeric)), 0) as lost_profit
+          FROM inventory i
+          INNER JOIN returns r ON 
+            i.invent_serial_id = r.serial_id AND
+            i.data_area_id = r.area_id AND
+            i.item_id = r.item_id
+          WHERE ${whereClauseAliased}
+          GROUP BY CONCAT(i.make, ' ', i.model_num)
+        )
+        SELECT 
+          ps.product,
+          CASE WHEN ps.units > 0 THEN (COALESCE(pr.return_count, 0)::float / ps.units) * 100 ELSE 0 END as return_rate,
+          COALESCE(pr.lost_profit, 0) as lost_profit
+        FROM product_sales ps
+        LEFT JOIN product_returns pr ON ps.product = pr.product
+        WHERE COALESCE(pr.return_count, 0) > 0
+        ORDER BY return_rate DESC
+        LIMIT 1
+      `, params);
+
+      // Regional performance (UAE vs UK)
+      const regionalPerf = await pool.query(`
+        WITH region_sales AS (
+          SELECT 
+            UPPER(data_area_id) as region,
+            COUNT(*) as units,
+            COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+            COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as cost
+          FROM inventory 
+          WHERE ${whereClause}
+          GROUP BY UPPER(data_area_id)
+        ),
+        region_returns AS (
+          SELECT 
+            UPPER(i.data_area_id) as region,
+            COUNT(DISTINCT i.id) as return_count
+          FROM inventory i
+          INNER JOIN returns r ON 
+            i.invent_serial_id = r.serial_id AND
+            i.data_area_id = r.area_id AND
+            i.item_id = r.item_id
+          WHERE ${whereClauseAliased}
+          GROUP BY UPPER(i.data_area_id)
+        )
+        SELECT 
+          s.region,
+          s.units,
+          s.revenue,
+          s.cost,
+          s.revenue - s.cost as profit,
+          CASE WHEN s.units > 0 THEN (COALESCE(r.return_count, 0)::float / s.units) * 100 ELSE 0 END as return_rate
+        FROM region_sales s
+        LEFT JOIN region_returns r ON s.region = r.region
+        ORDER BY s.revenue DESC
+      `, params);
+
+      // Monthly trends
+      const monthlyTrends = await pool.query(`
+        WITH monthly_sales AS (
+          SELECT 
+            TO_CHAR(TO_DATE(invoice_date, 'YYYY-MM-DD'), 'YYYY-MM') as month,
+            COUNT(*) as units,
+            COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+            COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as cost
+          FROM inventory 
+          WHERE ${whereClause}
+            AND invoice_date IS NOT NULL 
+            AND invoice_date != ''
+            AND invoice_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+          GROUP BY TO_CHAR(TO_DATE(invoice_date, 'YYYY-MM-DD'), 'YYYY-MM')
+        ),
+        monthly_returns AS (
+          SELECT 
+            TO_CHAR(TO_DATE(i.invoice_date, 'YYYY-MM-DD'), 'YYYY-MM') as month,
+            COUNT(DISTINCT i.id) as return_count
+          FROM inventory i
+          INNER JOIN returns r ON 
+            i.invent_serial_id = r.serial_id AND
+            i.data_area_id = r.area_id AND
+            i.item_id = r.item_id
+          WHERE ${whereClauseAliased}
+            AND i.invoice_date IS NOT NULL 
+            AND i.invoice_date != ''
+            AND i.invoice_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+          GROUP BY TO_CHAR(TO_DATE(i.invoice_date, 'YYYY-MM-DD'), 'YYYY-MM')
+        )
+        SELECT 
+          s.month,
+          s.revenue,
+          s.revenue - s.cost as profit,
+          CASE WHEN s.revenue > 0 THEN ((s.revenue - s.cost) / s.revenue) * 100 ELSE 0 END as margin,
+          CASE WHEN s.units > 0 THEN (COALESCE(r.return_count, 0)::float / s.units) * 100 ELSE 0 END as return_rate
+        FROM monthly_sales s
+        LEFT JOIN monthly_returns r ON s.month = r.month
+        ORDER BY s.month DESC
+        LIMIT 12
+      `, params);
+
+      // Generate critical alerts
+      const criticalAlerts: any[] = [];
+
+      if (netMargin < 5) {
+        criticalAlerts.push({
+          type: 'margin',
+          severity: netMargin < 0 ? 'critical' : 'warning',
+          title: 'Net Margin Alert',
+          description: `Net margin after returns is ${netMargin.toFixed(1)}% - below target`,
+          impact: profitLost,
+          recommendation: 'Focus on reducing return rates and improving product quality'
+        });
+      }
+
+      if (returnRate > 5) {
+        criticalAlerts.push({
+          type: 'returns',
+          severity: returnRate > 10 ? 'critical' : 'warning',
+          title: 'High Return Rate',
+          description: `${returnRate.toFixed(1)}% of sales are being returned`,
+          impact: revenueAtRisk,
+          recommendation: 'Analyze return reasons and address quality issues'
+        });
+      }
+
+      // Check for negative margin categories
+      const negMarginCats = categoryPerf.rows.filter(c => parseFloat(c.margin) < 0);
+      if (negMarginCats.length > 0) {
+        criticalAlerts.push({
+          type: 'product',
+          severity: 'critical',
+          title: 'Negative Margin Categories',
+          description: `${negMarginCats.length} categories are losing money`,
+          impact: negMarginCats.reduce((sum, c) => sum + Math.abs(parseFloat(c.profit)), 0),
+          recommendation: 'Review pricing or discontinue unprofitable categories'
+        });
+      }
+
+      res.json({
+        salesRevenue: totalRevenue,
+        salesCost: totalCost,
+        grossProfit,
+        grossMargin,
+        returnImpact: profitLost,
+        netProfit,
+        netMargin,
+        unitsSold,
+        unitsReturned,
+        returnRate,
+        uniqueCustomers: parseInt(sales.unique_customers) || 0,
+        uniqueProducts: parseInt(sales.unique_products) || 0,
+        profitabilityWaterfall: {
+          grossRevenue: totalRevenue,
+          purchaseCost,
+          partsCost,
+          freightCost,
+          laborCost,
+          packagingCost,
+          otherCosts,
+          grossProfit,
+          returnImpact: profitLost,
+          netProfit,
+          grossMargin,
+          netMargin,
+        },
+        topPerformingCategory: topCategory ? {
+          name: topCategory.category,
+          profit: parseFloat(topCategory.profit),
+          margin: parseFloat(topCategory.margin),
+        } : { name: 'N/A', profit: 0, margin: 0 },
+        worstPerformingCategory: worstCategory ? {
+          name: worstCategory.category,
+          profit: parseFloat(worstCategory.profit),
+          margin: parseFloat(worstCategory.margin),
+        } : { name: 'N/A', profit: 0, margin: 0 },
+        topCustomer: topCustomerResult.rows[0] ? {
+          name: topCustomerResult.rows[0].customer,
+          revenue: parseFloat(topCustomerResult.rows[0].revenue),
+          margin: parseFloat(topCustomerResult.rows[0].margin),
+        } : { name: 'N/A', revenue: 0, margin: 0 },
+        highestReturnProduct: highReturnProduct.rows[0] ? {
+          name: highReturnProduct.rows[0].product,
+          returnRate: parseFloat(highReturnProduct.rows[0].return_rate),
+          lostProfit: parseFloat(highReturnProduct.rows[0].lost_profit),
+        } : { name: 'N/A', returnRate: 0, lostProfit: 0 },
+        regionPerformance: regionalPerf.rows.map(r => ({
+          region: r.region || 'Unknown',
+          revenue: parseFloat(r.revenue),
+          profit: parseFloat(r.profit),
+          returnRate: parseFloat(r.return_rate),
+        })),
+        criticalAlerts,
+        monthlyTrends: monthlyTrends.rows.map(m => ({
+          month: m.month,
+          revenue: parseFloat(m.revenue),
+          profit: parseFloat(m.profit),
+          margin: parseFloat(m.margin),
+          returnRate: parseFloat(m.return_rate),
+        })).reverse(),
+      });
+    } catch (error) {
+      console.error("Error fetching strategic dashboard:", error);
+      res.status(500).json({ error: "Failed to fetch strategic dashboard data" });
+    }
+  });
+
+  // Customer Intelligence - Value segmentation with return impact
+  app.get("/api/strategic/customers", async (_req: Request, res: Response) => {
+    try {
+      const customerData = await pool.query(`
+        WITH customer_sales AS (
+          SELECT 
+            UPPER(COALESCE(invoicing_name, 'UNKNOWN')) as customer,
+            COUNT(*) as units_sold,
+            COUNT(DISTINCT sales_id) as orders,
+            COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+            COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as cost,
+            MAX(invoice_date) as last_order
+          FROM inventory 
+          WHERE trans_type = 'SalesOrder'
+          GROUP BY UPPER(COALESCE(invoicing_name, 'UNKNOWN'))
+        ),
+        customer_returns AS (
+          SELECT 
+            UPPER(COALESCE(i.invoicing_name, 'UNKNOWN')) as customer,
+            COUNT(DISTINCT i.id) as units_returned,
+            COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric) - CAST(i.final_total_cost_usd AS numeric)), 0) as profit_lost
+          FROM inventory i
+          INNER JOIN returns r ON 
+            i.invent_serial_id = r.serial_id AND
+            i.data_area_id = r.area_id AND
+            i.item_id = r.item_id
+          WHERE i.trans_type = 'SalesOrder'
+          GROUP BY UPPER(COALESCE(i.invoicing_name, 'UNKNOWN'))
+        )
+        SELECT 
+          s.customer,
+          s.units_sold,
+          s.orders,
+          s.revenue,
+          s.cost,
+          s.revenue - s.cost as gross_profit,
+          CASE WHEN s.revenue > 0 THEN ((s.revenue - s.cost) / s.revenue) * 100 ELSE 0 END as gross_margin,
+          COALESCE(r.units_returned, 0) as units_returned,
+          CASE WHEN s.units_sold > 0 THEN (COALESCE(r.units_returned, 0)::float / s.units_sold) * 100 ELSE 0 END as return_rate,
+          (s.revenue - s.cost) - COALESCE(r.profit_lost, 0) as profit_after_returns,
+          s.last_order
+        FROM customer_sales s
+        LEFT JOIN customer_returns r ON s.customer = r.customer
+        ORDER BY s.revenue DESC
+      `);
+
+      const totalRevenue = customerData.rows.reduce((sum, c) => sum + parseFloat(c.revenue), 0);
+      const top5Revenue = customerData.rows.slice(0, 5).reduce((sum, c) => sum + parseFloat(c.revenue), 0);
+      const customerConcentration = totalRevenue > 0 ? (top5Revenue / totalRevenue) * 100 : 0;
+
+      const customers = customerData.rows.map(c => {
+        const revenue = parseFloat(c.revenue);
+        const grossMargin = parseFloat(c.gross_margin);
+        const returnRate = parseFloat(c.return_rate);
+        
+        // Determine customer value tier
+        let customerValue: 'platinum' | 'gold' | 'silver' | 'bronze' | 'at-risk';
+        if (revenue > 100000 && grossMargin > 15 && returnRate < 5) customerValue = 'platinum';
+        else if (revenue > 50000 && grossMargin > 10) customerValue = 'gold';
+        else if (revenue > 10000 && grossMargin > 5) customerValue = 'silver';
+        else if (returnRate > 15 || grossMargin < 0) customerValue = 'at-risk';
+        else customerValue = 'bronze';
+
+        // Determine risk level
+        let riskLevel: 'low' | 'medium' | 'high';
+        if (returnRate > 15 || grossMargin < 0) riskLevel = 'high';
+        else if (returnRate > 10 || grossMargin < 5) riskLevel = 'medium';
+        else riskLevel = 'low';
+
+        return {
+          customer: c.customer,
+          totalRevenue: revenue,
+          totalCost: parseFloat(c.cost),
+          grossProfit: parseFloat(c.gross_profit),
+          grossMargin,
+          unitsSold: parseInt(c.units_sold),
+          unitsReturned: parseInt(c.units_returned),
+          returnRate,
+          profitAfterReturns: parseFloat(c.profit_after_returns),
+          netMargin: revenue > 0 ? (parseFloat(c.profit_after_returns) / revenue) * 100 : 0,
+          customerValue,
+          riskLevel,
+          orders: parseInt(c.orders),
+          avgOrderValue: parseInt(c.orders) > 0 ? revenue / parseInt(c.orders) : 0,
+          lastOrderDate: c.last_order,
+        };
+      });
+
+      res.json({
+        totalCustomers: customers.length,
+        platinumCustomers: customers.filter(c => c.customerValue === 'platinum').slice(0, 10),
+        atRiskCustomers: customers.filter(c => c.customerValue === 'at-risk').slice(0, 10),
+        highReturnCustomers: customers.filter(c => c.returnRate > 10).sort((a, b) => b.returnRate - a.returnRate).slice(0, 10),
+        customerConcentration,
+        avgCustomerLifetimeValue: customers.length > 0 ? totalRevenue / customers.length : 0,
+        avgReturnRate: customers.length > 0 ? customers.reduce((sum, c) => sum + c.returnRate, 0) / customers.length : 0,
+      });
+    } catch (error) {
+      console.error("Error fetching customer intelligence:", error);
+      res.status(500).json({ error: "Failed to fetch customer intelligence" });
+    }
+  });
+
+  // Product Intelligence - Risk/Reward matrix with return impact
+  app.get("/api/strategic/products", async (_req: Request, res: Response) => {
+    try {
+      const productData = await pool.query(`
+        WITH product_sales AS (
+          SELECT 
+            CONCAT(make, ' ', model_num) as product,
+            make,
+            UPPER(COALESCE(category, 'UNKNOWN')) as category,
+            COUNT(*) as units_sold,
+            COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+            COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as cost
+          FROM inventory 
+          WHERE trans_type = 'SalesOrder'
+          GROUP BY CONCAT(make, ' ', model_num), make, UPPER(COALESCE(category, 'UNKNOWN'))
+        ),
+        product_returns AS (
+          SELECT 
+            CONCAT(i.make, ' ', i.model_num) as product,
+            COUNT(DISTINCT i.id) as units_returned,
+            COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric) - CAST(i.final_total_cost_usd AS numeric)), 0) as profit_lost
+          FROM inventory i
+          INNER JOIN returns r ON 
+            i.invent_serial_id = r.serial_id AND
+            i.data_area_id = r.area_id AND
+            i.item_id = r.item_id
+          WHERE i.trans_type = 'SalesOrder'
+          GROUP BY CONCAT(i.make, ' ', i.model_num)
+        )
+        SELECT 
+          s.product,
+          s.make,
+          s.category,
+          s.units_sold,
+          s.revenue,
+          s.cost,
+          s.revenue - s.cost as gross_profit,
+          CASE WHEN s.revenue > 0 THEN ((s.revenue - s.cost) / s.revenue) * 100 ELSE 0 END as gross_margin,
+          COALESCE(r.units_returned, 0) as units_returned,
+          CASE WHEN s.units_sold > 0 THEN (COALESCE(r.units_returned, 0)::float / s.units_sold) * 100 ELSE 0 END as return_rate,
+          (s.revenue - s.cost) - COALESCE(r.profit_lost, 0) as profit_after_returns
+        FROM product_sales s
+        LEFT JOIN product_returns r ON s.product = r.product
+        WHERE s.units_sold >= 3
+        ORDER BY s.revenue DESC
+      `);
+
+      // Calculate max values for scoring
+      const maxProfit = Math.max(...productData.rows.map(p => parseFloat(p.gross_profit)));
+      const maxVolume = Math.max(...productData.rows.map(p => parseInt(p.units_sold)));
+
+      const products = productData.rows.map(p => {
+        const grossProfit = parseFloat(p.gross_profit);
+        const grossMargin = parseFloat(p.gross_margin);
+        const returnRate = parseFloat(p.return_rate);
+        const volume = parseInt(p.units_sold);
+        const revenue = parseFloat(p.revenue);
+
+        // Risk score (0-100, higher = riskier) based on return rate and low margin
+        const riskScore = Math.min(100, (returnRate * 5) + (grossMargin < 5 ? 30 : 0) + (grossMargin < 0 ? 50 : 0));
+        
+        // Reward score (0-100) based on profit and volume
+        const profitScore = maxProfit > 0 ? (grossProfit / maxProfit) * 50 : 0;
+        const volumeScore = maxVolume > 0 ? (volume / maxVolume) * 50 : 0;
+        const rewardScore = Math.min(100, profitScore + volumeScore);
+
+        // Quadrant classification
+        let quadrant: 'star' | 'cash-cow' | 'question-mark' | 'dog';
+        if (rewardScore > 50 && riskScore < 30) quadrant = 'star';
+        else if (rewardScore > 30 && riskScore < 50) quadrant = 'cash-cow';
+        else if (rewardScore > 30 && riskScore >= 50) quadrant = 'question-mark';
+        else quadrant = 'dog';
+
+        return {
+          product: p.product,
+          make: p.make || 'Unknown',
+          category: p.category,
+          unitsSold: volume,
+          revenue,
+          cost: parseFloat(p.cost),
+          grossProfit,
+          grossMargin,
+          unitsReturned: parseInt(p.units_returned),
+          returnRate,
+          profitAfterReturns: parseFloat(p.profit_after_returns),
+          netMargin: revenue > 0 ? (parseFloat(p.profit_after_returns) / revenue) * 100 : 0,
+          riskScore,
+          rewardScore,
+          quadrant,
+        };
+      });
+
+      // Category performance
+      const categoryPerf = await pool.query(`
+        WITH cat_sales AS (
+          SELECT 
+            UPPER(COALESCE(category, 'UNKNOWN')) as category,
+            COUNT(*) as units,
+            COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+            COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as cost
+          FROM inventory 
+          WHERE trans_type = 'SalesOrder'
+          GROUP BY UPPER(COALESCE(category, 'UNKNOWN'))
+        ),
+        cat_returns AS (
+          SELECT 
+            UPPER(COALESCE(i.category, 'UNKNOWN')) as category,
+            COUNT(DISTINCT i.id) as return_count
+          FROM inventory i
+          INNER JOIN returns r ON 
+            i.invent_serial_id = r.serial_id AND
+            i.data_area_id = r.area_id AND
+            i.item_id = r.item_id
+          WHERE i.trans_type = 'SalesOrder'
+          GROUP BY UPPER(COALESCE(i.category, 'UNKNOWN'))
+        )
+        SELECT 
+          s.category,
+          s.units,
+          s.revenue,
+          s.revenue - s.cost as profit,
+          CASE WHEN s.revenue > 0 THEN ((s.revenue - s.cost) / s.revenue) * 100 ELSE 0 END as margin,
+          CASE WHEN s.units > 0 THEN (COALESCE(r.return_count, 0)::float / s.units) * 100 ELSE 0 END as return_rate
+        FROM cat_sales s
+        LEFT JOIN cat_returns r ON s.category = r.category
+        ORDER BY s.revenue DESC
+      `);
+
+      // Make performance
+      const makePerf = await pool.query(`
+        WITH make_sales AS (
+          SELECT 
+            UPPER(COALESCE(make, 'UNKNOWN')) as make,
+            COUNT(*) as units,
+            COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
+            COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as cost
+          FROM inventory 
+          WHERE trans_type = 'SalesOrder'
+          GROUP BY UPPER(COALESCE(make, 'UNKNOWN'))
+        ),
+        make_returns AS (
+          SELECT 
+            UPPER(COALESCE(i.make, 'UNKNOWN')) as make,
+            COUNT(DISTINCT i.id) as return_count
+          FROM inventory i
+          INNER JOIN returns r ON 
+            i.invent_serial_id = r.serial_id AND
+            i.data_area_id = r.area_id AND
+            i.item_id = r.item_id
+          WHERE i.trans_type = 'SalesOrder'
+          GROUP BY UPPER(COALESCE(i.make, 'UNKNOWN'))
+        )
+        SELECT 
+          s.make,
+          s.units,
+          s.revenue,
+          s.revenue - s.cost as profit,
+          CASE WHEN s.revenue > 0 THEN ((s.revenue - s.cost) / s.revenue) * 100 ELSE 0 END as margin,
+          CASE WHEN s.units > 0 THEN (COALESCE(r.return_count, 0)::float / s.units) * 100 ELSE 0 END as return_rate
+        FROM make_sales s
+        LEFT JOIN make_returns r ON s.make = r.make
+        ORDER BY s.revenue DESC
+      `);
+
+      res.json({
+        totalProducts: products.length,
+        totalModels: new Set(products.map(p => p.product)).size,
+        stars: products.filter(p => p.quadrant === 'star').slice(0, 10),
+        cashCows: products.filter(p => p.quadrant === 'cash-cow').slice(0, 10),
+        questionMarks: products.filter(p => p.quadrant === 'question-mark').slice(0, 10),
+        dogs: products.filter(p => p.quadrant === 'dog').slice(0, 10),
+        categoryPerformance: categoryPerf.rows.map(c => ({
+          category: c.category,
+          revenue: parseFloat(c.revenue),
+          profit: parseFloat(c.profit),
+          margin: parseFloat(c.margin),
+          returnRate: parseFloat(c.return_rate),
+          units: parseInt(c.units),
+        })),
+        makePerformance: makePerf.rows.map(m => ({
+          make: m.make,
+          revenue: parseFloat(m.revenue),
+          profit: parseFloat(m.profit),
+          margin: parseFloat(m.margin),
+          returnRate: parseFloat(m.return_rate),
+          units: parseInt(m.units),
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching product intelligence:", error);
+      res.status(500).json({ error: "Failed to fetch product intelligence" });
+    }
+  });
+
+  // Returns Deep Dive - Linked returns analysis
+  app.get("/api/strategic/returns", async (_req: Request, res: Response) => {
+    try {
+      // Linked vs unlinked returns
+      const linkedReturns = await pool.query(`
+        SELECT COUNT(DISTINCT r.id) as linked_count
+        FROM returns r
+        INNER JOIN inventory i ON 
+          i.invent_serial_id = r.serial_id AND
+          i.data_area_id = r.area_id AND
+          i.item_id = r.item_id
+        WHERE i.trans_type = 'SalesOrder'
+      `);
+
+      const totalReturns = await pool.query(`SELECT COUNT(*) as total FROM returns`);
+      
+      const linkedCount = parseInt(linkedReturns.rows[0]?.linked_count) || 0;
+      const totalCount = parseInt(totalReturns.rows[0]?.total) || 0;
+
+      // Return reasons impact
+      const reasonImpact = await pool.query(`
+        SELECT 
+          COALESCE(r.reason_for_return, 'Unknown') as reason,
+          COUNT(*) as count,
+          COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric) - CAST(i.final_total_cost_usd AS numeric)), 0) as estimated_cost
+        FROM returns r
+        LEFT JOIN inventory i ON 
+          i.invent_serial_id = r.serial_id AND
+          i.data_area_id = r.area_id AND
+          i.item_id = r.item_id AND
+          i.trans_type = 'SalesOrder'
+        GROUP BY COALESCE(r.reason_for_return, 'Unknown')
+        ORDER BY count DESC
+        LIMIT 10
+      `);
+
+      const totalReasonCount = reasonImpact.rows.reduce((sum, r) => sum + parseInt(r.count), 0);
+
+      // Monthly returns trend
+      const monthlyReturns = await pool.query(`
+        SELECT 
+          TO_CHAR(TO_DATE(r.created_on, 'YYYY-MM-DD'), 'YYYY-MM') as month,
+          COUNT(*) as count,
+          COALESCE(SUM(CAST(i.final_sales_price_usd AS numeric)), 0) as linked_revenue
+        FROM returns r
+        LEFT JOIN inventory i ON 
+          i.invent_serial_id = r.serial_id AND
+          i.data_area_id = r.area_id AND
+          i.item_id = r.item_id AND
+          i.trans_type = 'SalesOrder'
+        WHERE r.created_on IS NOT NULL 
+          AND r.created_on != ''
+          AND r.created_on ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+        GROUP BY TO_CHAR(TO_DATE(r.created_on, 'YYYY-MM-DD'), 'YYYY-MM')
+        ORDER BY month DESC
+        LIMIT 12
+      `);
+
+      // Top return products
+      const topReturnProducts = await pool.query(`
+        WITH product_sales AS (
+          SELECT 
+            CONCAT(make, ' ', model_num) as product,
+            COUNT(*) as sold
+          FROM inventory 
+          WHERE trans_type = 'SalesOrder'
+          GROUP BY CONCAT(make, ' ', model_num)
+        ),
+        product_returns AS (
+          SELECT 
+            CONCAT(i.make, ' ', i.model_num) as product,
+            COUNT(DISTINCT r.id) as return_count
+          FROM returns r
+          INNER JOIN inventory i ON 
+            i.invent_serial_id = r.serial_id AND
+            i.data_area_id = r.area_id AND
+            i.item_id = r.item_id
+          WHERE i.trans_type = 'SalesOrder'
+          GROUP BY CONCAT(i.make, ' ', i.model_num)
+        )
+        SELECT 
+          pr.product,
+          pr.return_count,
+          CASE WHEN ps.sold > 0 THEN (pr.return_count::float / ps.sold) * 100 ELSE 0 END as return_rate
+        FROM product_returns pr
+        LEFT JOIN product_sales ps ON pr.product = ps.product
+        ORDER BY pr.return_count DESC
+        LIMIT 10
+      `);
+
+      // Top return customers
+      const topReturnCustomers = await pool.query(`
+        WITH customer_sales AS (
+          SELECT 
+            UPPER(invoicing_name) as customer,
+            COUNT(*) as sold
+          FROM inventory 
+          WHERE trans_type = 'SalesOrder'
+          GROUP BY UPPER(invoicing_name)
+        ),
+        customer_returns AS (
+          SELECT 
+            UPPER(i.invoicing_name) as customer,
+            COUNT(DISTINCT r.id) as return_count
+          FROM returns r
+          INNER JOIN inventory i ON 
+            i.invent_serial_id = r.serial_id AND
+            i.data_area_id = r.area_id AND
+            i.item_id = r.item_id
+          WHERE i.trans_type = 'SalesOrder'
+          GROUP BY UPPER(i.invoicing_name)
+        )
+        SELECT 
+          cr.customer,
+          cr.return_count,
+          CASE WHEN cs.sold > 0 THEN (cr.return_count::float / cs.sold) * 100 ELSE 0 END as return_rate
+        FROM customer_returns cr
+        LEFT JOIN customer_sales cs ON cr.customer = cs.customer
+        ORDER BY cr.return_count DESC
+        LIMIT 10
+      `);
+
+      res.json({
+        totalReturnsLinked: linkedCount,
+        totalReturnsUnlinked: totalCount - linkedCount,
+        avgDaysToReturn: 0, // Would need date comparison
+        returnReasonImpact: reasonImpact.rows.map(r => ({
+          reason: r.reason,
+          count: parseInt(r.count),
+          percentOfReturns: totalReasonCount > 0 ? (parseInt(r.count) / totalReasonCount) * 100 : 0,
+          estimatedCost: parseFloat(r.estimated_cost),
+          avgDaysToReturn: 0,
+          topProducts: [],
+          trend: 'stable' as const,
+        })),
+        returnsByMonth: monthlyReturns.rows.map(m => ({
+          month: m.month,
+          count: parseInt(m.count),
+          linkedRevenue: parseFloat(m.linked_revenue),
+        })).reverse(),
+        repeatReturnSerials: 0,
+        topReturnProducts: topReturnProducts.rows.map(p => ({
+          product: p.product,
+          returnCount: parseInt(p.return_count),
+          returnRate: parseFloat(p.return_rate),
+        })),
+        topReturnCustomers: topReturnCustomers.rows.map(c => ({
+          customer: c.customer,
+          returnCount: parseInt(c.return_count),
+          returnRate: parseFloat(c.return_rate),
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching returns deep dive:", error);
+      res.status(500).json({ error: "Failed to fetch returns analysis" });
+    }
+  });
+
+  // ============================================
   // REFRESH DB - Scheduled Data Sync Endpoint
   // ============================================
   

@@ -589,3 +589,244 @@ export interface DrillDownConfig {
   limit?: number;
   groupBy?: string;
 }
+
+// ========== STRATEGIC EXECUTIVE INSIGHTS ==========
+
+// Sales with Returns Impact Analysis
+// Only TransType='SalesOrder' joins to returns via (invent_serial_id, data_area_id, item_id, crm_ref) = (serial_id, area_id, item_id, sales_order_number)
+export interface SalesReturnImpact {
+  totalSalesUnits: number;
+  totalSalesRevenue: number;
+  totalSalesCost: number;
+  totalSalesProfit: number;
+  unitsWithReturns: number;
+  unitsWithoutReturns: number;
+  returnRate: number;
+  revenueAtRisk: number; // Revenue from units that were returned
+  profitLostToReturns: number;
+  netRealizedProfit: number; // Profit after return impact
+  adjustedMargin: number; // Margin after accounting for returns
+}
+
+// Profitability Waterfall - Shows how revenue becomes profit
+export interface ProfitabilityWaterfall {
+  grossRevenue: number;
+  purchaseCost: number;
+  partsCost: number;
+  freightCost: number;
+  laborCost: number; // resource + standardisation
+  packagingCost: number;
+  otherCosts: number; // misc, consumable, battery, LCD, COA
+  grossProfit: number;
+  returnImpact: number; // Profit lost to returns
+  netProfit: number;
+  grossMargin: number;
+  netMargin: number;
+}
+
+// Customer Value Intelligence
+export interface CustomerValueMetrics {
+  customer: string;
+  totalRevenue: number;
+  totalCost: number;
+  grossProfit: number;
+  grossMargin: number;
+  unitsSold: number;
+  unitsReturned: number;
+  returnRate: number;
+  profitAfterReturns: number;
+  netMargin: number;
+  customerValue: 'platinum' | 'gold' | 'silver' | 'bronze' | 'at-risk';
+  riskLevel: 'low' | 'medium' | 'high';
+  orders: number;
+  avgOrderValue: number;
+  lastOrderDate: string | null;
+}
+
+export interface CustomerIntelligence {
+  totalCustomers: number;
+  platinumCustomers: CustomerValueMetrics[];
+  atRiskCustomers: CustomerValueMetrics[];
+  highReturnCustomers: CustomerValueMetrics[];
+  customerConcentration: number; // Top 5 customers % of revenue
+  avgCustomerLifetimeValue: number;
+  avgReturnRate: number;
+}
+
+// Product Performance Matrix - Risk vs Reward
+export interface ProductPerformanceMetrics {
+  product: string;
+  make: string;
+  category: string;
+  unitsSold: number;
+  revenue: number;
+  cost: number;
+  grossProfit: number;
+  grossMargin: number;
+  unitsReturned: number;
+  returnRate: number;
+  profitAfterReturns: number;
+  netMargin: number;
+  riskScore: number; // Based on return rate and margin
+  rewardScore: number; // Based on volume and profit
+  quadrant: 'star' | 'cash-cow' | 'question-mark' | 'dog';
+}
+
+export interface ProductIntelligence {
+  totalProducts: number;
+  totalModels: number;
+  stars: ProductPerformanceMetrics[]; // High profit, low risk
+  cashCows: ProductPerformanceMetrics[]; // Moderate profit, low risk
+  questionMarks: ProductPerformanceMetrics[]; // High potential, high risk
+  dogs: ProductPerformanceMetrics[]; // Low profit, high risk
+  categoryPerformance: {
+    category: string;
+    revenue: number;
+    profit: number;
+    margin: number;
+    returnRate: number;
+    units: number;
+  }[];
+  makePerformance: {
+    make: string;
+    revenue: number;
+    profit: number;
+    margin: number;
+    returnRate: number;
+    units: number;
+  }[];
+}
+
+// Regional Performance (UAE vs UK)
+export interface RegionalMetrics {
+  region: string;
+  salesUnits: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+  margin: number;
+  returnsCount: number;
+  returnRate: number;
+  netProfit: number;
+  netMargin: number;
+  topCategories: { category: string; revenue: number; units: number }[];
+  topCustomers: { customer: string; revenue: number; units: number }[];
+}
+
+export interface RegionalIntelligence {
+  regions: RegionalMetrics[];
+  bestPerformingRegion: string;
+  highestReturnRateRegion: string;
+  revenueByRegion: { region: string; revenue: number; percent: number }[];
+  profitByRegion: { region: string; profit: number; percent: number }[];
+}
+
+// Return Reasons Impact Analysis
+export interface ReturnReasonImpact {
+  reason: string;
+  count: number;
+  percentOfReturns: number;
+  estimatedCost: number; // Lost profit from these returns
+  avgDaysToReturn: number;
+  topProducts: string[];
+  trend: 'increasing' | 'stable' | 'decreasing';
+}
+
+export interface ReturnsDeepDive {
+  totalReturnsLinked: number; // Returns that match to sales
+  totalReturnsUnlinked: number; // Returns without matching sales
+  avgDaysToReturn: number;
+  returnReasonImpact: ReturnReasonImpact[];
+  returnsByMonth: { month: string; count: number; linkedRevenue: number }[];
+  repeatReturnSerials: number; // Same serial returned multiple times
+  topReturnProducts: { product: string; returnCount: number; returnRate: number }[];
+  topReturnCustomers: { customer: string; returnCount: number; returnRate: number }[];
+}
+
+// Cost Structure Analysis
+export interface CostBreakdown {
+  category: string;
+  purchaseCost: number;
+  purchasePercent: number;
+  partsCost: number;
+  partsPercent: number;
+  freightCost: number;
+  freightPercent: number;
+  laborCost: number;
+  laborPercent: number;
+  otherCosts: number;
+  otherPercent: number;
+  totalCost: number;
+  avgCostPerUnit: number;
+  costTrend: 'increasing' | 'stable' | 'decreasing';
+}
+
+export interface CostIntelligence {
+  totalCost: number;
+  costBreakdown: {
+    purchase: number;
+    parts: number;
+    freight: number;
+    labor: number;
+    packaging: number;
+    other: number;
+  };
+  costByCategory: CostBreakdown[];
+  costByMake: CostBreakdown[];
+  highCostAlerts: {
+    type: string;
+    description: string;
+    impact: number;
+    recommendation: string;
+  }[];
+}
+
+// Strategic Executive Dashboard Summary
+export interface StrategicDashboardData {
+  // Top-line metrics
+  salesRevenue: number;
+  salesCost: number;
+  grossProfit: number;
+  grossMargin: number;
+  returnImpact: number;
+  netProfit: number;
+  netMargin: number;
+  
+  // Volume metrics
+  unitsSold: number;
+  unitsReturned: number;
+  returnRate: number;
+  uniqueCustomers: number;
+  uniqueProducts: number;
+  
+  // Profitability waterfall
+  profitabilityWaterfall: ProfitabilityWaterfall;
+  
+  // Performance summaries
+  topPerformingCategory: { name: string; profit: number; margin: number };
+  worstPerformingCategory: { name: string; profit: number; margin: number };
+  topCustomer: { name: string; revenue: number; margin: number };
+  highestReturnProduct: { name: string; returnRate: number; lostProfit: number };
+  
+  // Regional summary
+  regionPerformance: { region: string; revenue: number; profit: number; returnRate: number }[];
+  
+  // Alerts & Recommendations
+  criticalAlerts: {
+    type: 'margin' | 'returns' | 'customer' | 'product' | 'cost';
+    severity: 'critical' | 'warning' | 'info';
+    title: string;
+    description: string;
+    impact: number;
+    recommendation: string;
+  }[];
+  
+  // Trends
+  monthlyTrends: {
+    month: string;
+    revenue: number;
+    profit: number;
+    margin: number;
+    returnRate: number;
+  }[];
+}

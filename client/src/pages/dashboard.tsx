@@ -4,31 +4,31 @@ import { format } from "date-fns";
 import {
   DollarSign,
   TrendingUp,
+  TrendingDown,
   Package,
-  ShoppingCart,
   Users,
   RefreshCw,
-  AlertTriangle,
-  Truck,
-  Clock,
   RotateCcw,
+  Target,
+  Percent,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { KPICard } from "@/components/kpi-card";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { FilterPanel } from "@/components/filter-panel";
-import { RevenueChart } from "@/components/charts/revenue-chart";
-import { CategoryChart } from "@/components/charts/category-chart";
-import { StatusChart } from "@/components/charts/status-chart";
-import { TopPerformers } from "@/components/charts/top-performers";
 import { ConnectionError } from "@/components/connection-error";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Progress } from "@/components/ui/progress";
 import { DashboardToolbar } from "@/components/DashboardToolbar";
 import { AIInsightsPanel } from "@/components/AIInsightsPanel";
-import type { DashboardData, FilterDropdownOptions, FilterOptions, ExecutiveSummary, FreightAnalysis, InventoryAgingAnalysis, ReturnsAnalysis, MarginAnalysis } from "@shared/schema";
+import { ProfitabilityWaterfall } from "@/components/charts/profitability-waterfall";
+import { ReturnImpactCard } from "@/components/charts/return-impact-card";
+import { RegionalPerformance } from "@/components/charts/regional-performance";
+import { CriticalAlerts } from "@/components/charts/critical-alerts";
+import { PerformanceSummary } from "@/components/charts/performance-summary";
+import { MonthlyTrendsChart } from "@/components/charts/monthly-trends-chart";
+import type { FilterDropdownOptions, FilterOptions, StrategicDashboardData } from "@shared/schema";
 
 interface DateRange {
   from: Date | undefined;
@@ -36,10 +36,10 @@ interface DateRange {
 }
 
 const formatCurrency = (value: number) => {
-  if (value >= 1000000) {
+  if (Math.abs(value) >= 1000000) {
     return `$${(value / 1000000).toFixed(2)}M`;
   }
-  if (value >= 1000) {
+  if (Math.abs(value) >= 1000) {
     return `$${(value / 1000).toFixed(1)}K`;
   }
   return `$${value.toFixed(0)}`;
@@ -69,33 +69,15 @@ export default function Dashboard() {
     return params.toString();
   };
 
-  const { data: dashboardData, isLoading: dashboardLoading, refetch, isError } = useQuery<DashboardData>({
-    queryKey: ["/api/dashboard", buildQueryParams()],
-    retry: 1,
-  });
-
-  const { data: executiveSummary, isLoading: executiveLoading } = useQuery<ExecutiveSummary>({
-    queryKey: ["/api/insights/executive-summary"],
-    retry: 1,
-  });
-
-  const { data: freightData, isLoading: freightLoading } = useQuery<FreightAnalysis>({
-    queryKey: ["/api/insights/freight"],
-    retry: 1,
-  });
-
-  const { data: agingData, isLoading: agingLoading } = useQuery<InventoryAgingAnalysis>({
-    queryKey: ["/api/insights/inventory-aging"],
-    retry: 1,
-  });
-
-  const { data: returnsData, isLoading: returnsLoading } = useQuery<ReturnsAnalysis>({
-    queryKey: ["/api/insights/returns"],
-    retry: 1,
-  });
-
-  const { data: marginData, isLoading: marginLoading } = useQuery<MarginAnalysis>({
-    queryKey: ["/api/insights/margins"],
+  const queryParams = buildQueryParams();
+  const { data: strategicData, isLoading: strategicLoading, refetch, isError } = useQuery<StrategicDashboardData>({
+    queryKey: ["/api/strategic/dashboard", queryParams],
+    queryFn: async () => {
+      const url = queryParams ? `/api/strategic/dashboard?${queryParams}` : "/api/strategic/dashboard";
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch strategic dashboard");
+      return res.json();
+    },
     retry: 1,
   });
 
@@ -128,35 +110,19 @@ export default function Dashboard() {
     grades: [],
   };
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'high': return 'destructive';
-      case 'medium': return 'secondary';
-      default: return 'outline';
-    }
-  };
-
-  const allAlerts = [
-    ...(executiveSummary?.criticalAlerts || []),
-    ...(freightData?.alerts || []),
-    ...(agingData?.alerts || []),
-    ...(returnsData?.alerts || []),
-    ...(marginData?.alerts || []),
-  ].slice(0, 6);
-
   return (
     <div className="p-4 space-y-4 max-w-full">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold" data-testid="text-dashboard-title">Executive Dashboard</h1>
+          <h1 className="text-2xl font-bold" data-testid="text-dashboard-title">Strategic Executive Dashboard</h1>
           <p className="text-sm text-muted-foreground">
-            Real-time profit insights and executive analytics
+            Real-time profitability insights with return impact analysis
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <DashboardToolbar 
-            pageName="Executive Dashboard" 
-            chartElementIds={["dashboard-kpis", "dashboard-charts", "dashboard-alerts"]}
+            pageName="Strategic Dashboard" 
+            chartElementIds={["dashboard-kpis", "dashboard-waterfall", "dashboard-trends"]}
             insightType="category"
           />
           <DateRangePicker dateRange={dateRange} onDateRangeChange={setDateRange} />
@@ -176,10 +142,10 @@ export default function Dashboard() {
               variant="outline"
               size="sm"
               onClick={handleRefresh}
-              disabled={dashboardLoading}
+              disabled={strategicLoading}
               data-testid="button-refresh"
             >
-              <RefreshCw className={`h-4 w-4 mr-1 ${dashboardLoading ? "animate-spin" : ""}`} />
+              <RefreshCw className={`h-4 w-4 mr-1 ${strategicLoading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
           </div>
@@ -187,7 +153,7 @@ export default function Dashboard() {
       </div>
 
       {isError && (
-        <ConnectionError onRetry={handleRefresh} isRetrying={dashboardLoading} />
+        <ConnectionError onRetry={handleRefresh} isRetrying={strategicLoading} />
       )}
 
       <FilterPanel
@@ -201,230 +167,109 @@ export default function Dashboard() {
         Last updated: {lastUpdated.toLocaleTimeString()}
       </div>
 
-      <div id="dashboard-kpis" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div id="dashboard-kpis" className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
         <KPICard
-          title="Total Revenue"
-          value={formatCurrency(dashboardData?.kpis.totalRevenue || 0)}
+          title="Sales Revenue"
+          value={formatCurrency(strategicData?.salesRevenue || 0)}
           icon={<DollarSign className="h-4 w-4" />}
-          isLoading={dashboardLoading}
+          isLoading={strategicLoading}
         />
         <KPICard
-          title="Total Profit"
-          value={formatCurrency(dashboardData?.kpis.totalProfit || 0)}
-          trend={dashboardData?.kpis.profitMargin}
+          title="Gross Profit"
+          value={formatCurrency(strategicData?.grossProfit || 0)}
+          trend={strategicData?.grossMargin}
           trendLabel="margin"
           icon={<TrendingUp className="h-4 w-4" />}
-          isLoading={dashboardLoading}
+          isLoading={strategicLoading}
         />
         <KPICard
-          title="Profit Margin"
-          value={formatPercent(dashboardData?.kpis.profitMargin || 0)}
-          icon={<TrendingUp className="h-4 w-4" />}
-          isLoading={dashboardLoading}
+          title="Return Impact"
+          value={`-${formatCurrency(strategicData?.returnImpact || 0)}`}
+          icon={<RotateCcw className="h-4 w-4 text-red-500" />}
+          isLoading={strategicLoading}
+        />
+        <KPICard
+          title="Net Profit"
+          value={formatCurrency(strategicData?.netProfit || 0)}
+          trend={strategicData?.netMargin}
+          trendLabel="net margin"
+          icon={(strategicData?.netProfit || 0) >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-500" /> : <TrendingDown className="h-4 w-4 text-red-500" />}
+          isLoading={strategicLoading}
         />
         <KPICard
           title="Units Sold"
-          value={(dashboardData?.kpis.unitsSold || 0).toLocaleString()}
+          value={(strategicData?.unitsSold || 0).toLocaleString()}
           icon={<Package className="h-4 w-4" />}
-          isLoading={dashboardLoading}
+          isLoading={strategicLoading}
         />
         <KPICard
-          title="Total Orders"
-          value={(dashboardData?.kpis.totalOrders || 0).toLocaleString()}
-          icon={<ShoppingCart className="h-4 w-4" />}
-          isLoading={dashboardLoading}
+          title="Units Returned"
+          value={(strategicData?.unitsReturned || 0).toLocaleString()}
+          trend={strategicData?.returnRate}
+          trendLabel="return rate"
+          icon={<RotateCcw className="h-4 w-4" />}
+          isLoading={strategicLoading}
         />
         <KPICard
-          title="Avg Order Value"
-          value={formatCurrency(dashboardData?.kpis.averageOrderValue || 0)}
+          title="Customers"
+          value={(strategicData?.uniqueCustomers || 0).toLocaleString()}
           icon={<Users className="h-4 w-4" />}
-          isLoading={dashboardLoading}
+          isLoading={strategicLoading}
+        />
+        <KPICard
+          title="Products"
+          value={(strategicData?.uniqueProducts || 0).toLocaleString()}
+          icon={<Target className="h-4 w-4" />}
+          isLoading={strategicLoading}
         />
       </div>
 
-      {allAlerts.length > 0 && (
-        <Card id="dashboard-alerts">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-medium flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
-              Critical Alerts & Insights
-            </CardTitle>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card className="md:col-span-2 bg-gradient-to-r from-emerald-500/5 to-red-500/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium">Profitability Summary</CardTitle>
+            <CardDescription>Revenue to net profit with return impact</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {allAlerts.map((alert, idx) => (
-                <div key={idx} className="p-3 rounded-md border bg-muted/30">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <span className="text-sm font-medium">{alert.title}</span>
-                    <Badge variant={getSeverityColor(alert.severity)} className="shrink-0">
-                      {alert.severity}
-                    </Badge>
+            {strategicLoading ? (
+              <Skeleton className="h-24 w-full" />
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Gross Margin</div>
+                  <div className="text-2xl font-bold text-emerald-600">
+                    {formatPercent(strategicData?.grossMargin || 0)}
                   </div>
-                  <p className="text-xs text-muted-foreground mb-2">{alert.description}</p>
-                  <p className="text-xs text-primary">{alert.recommendation}</p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-medium flex items-center gap-2">
-              <Truck className="h-4 w-4 text-blue-500" />
-              Freight Overview
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {freightLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-3/4" />
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Total Freight</span>
-                  <span className="text-sm font-medium">{formatCurrency(freightData?.totalFreightCost || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">% of Total Cost</span>
-                  <span className="text-sm font-medium">{formatPercent(freightData?.freightAsPercentOfCost || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Avg Per Unit</span>
-                  <span className="text-sm font-medium">{formatCurrency(freightData?.averageFreightPerUnit || 0)}</span>
-                </div>
-                <div className="pt-2 border-t">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-xs text-muted-foreground">Concentration Risk</span>
-                    <span className={`text-xs font-medium ${(freightData?.freightConcentrationRisk || 0) > 65 ? 'text-amber-500' : ''}`}>
-                      {formatPercent(freightData?.freightConcentrationRisk || 0)}
-                    </span>
+                  <div className="text-xs text-muted-foreground">
+                    {formatCurrency(strategicData?.grossProfit || 0)} gross profit
                   </div>
-                  <Progress value={freightData?.freightConcentrationRisk || 0} className="h-1.5" />
                 </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-medium flex items-center gap-2">
-              <Clock className="h-4 w-4 text-orange-500" />
-              Inventory Aging
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {agingLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-3/4" />
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Total Value</span>
-                  <span className="text-sm font-medium">{formatCurrency(agingData?.totalInventoryValue || 0)}</span>
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Return Rate</div>
+                  <div className={`text-2xl font-bold ${(strategicData?.returnRate || 0) > 10 ? 'text-red-500' : (strategicData?.returnRate || 0) > 5 ? 'text-amber-500' : 'text-emerald-600'}`}>
+                    {formatPercent(strategicData?.returnRate || 0)}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {(strategicData?.unitsReturned || 0).toLocaleString()} units returned
+                  </div>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Avg Days Held</span>
-                  <span className="text-sm font-medium">{agingData?.averageDaysHeld || 0} days</span>
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Profit Lost</div>
+                  <div className="text-2xl font-bold text-red-500">
+                    -{formatCurrency(strategicData?.returnImpact || 0)}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {strategicData?.grossProfit ? ((strategicData.returnImpact / strategicData.grossProfit) * 100).toFixed(1) : 0}% of gross profit
+                  </div>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Dead Stock</span>
-                  <span className={`text-sm font-medium ${(agingData?.deadStockValue || 0) > 0 ? 'text-red-500' : ''}`}>
-                    {formatCurrency(agingData?.deadStockValue || 0)}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Slow Moving</span>
-                  <span className={`text-sm font-medium ${(agingData?.slowMovingValue || 0) > 0 ? 'text-amber-500' : ''}`}>
-                    {formatCurrency(agingData?.slowMovingValue || 0)}
-                  </span>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-medium flex items-center gap-2">
-              <RotateCcw className="h-4 w-4 text-purple-500" />
-              Returns & RMA
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {returnsLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-3/4" />
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Total Returns</span>
-                  <span className="text-sm font-medium">{returnsData?.totalReturns?.toLocaleString() || 0}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Return Rate</span>
-                  <span className={`text-sm font-medium ${(returnsData?.returnRate || 0) > 5 ? 'text-red-500' : ''}`}>
-                    {formatPercent(returnsData?.returnRate || 0)}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Last 30 Days</span>
-                  <span className="text-sm font-medium">{returnsData?.returnsLast30Days || 0}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Repeat Failures</span>
-                  <span className={`text-sm font-medium ${(returnsData?.repeatFailures || 0) > 0 ? 'text-amber-500' : ''}`}>
-                    {returnsData?.repeatFailures || 0}
-                  </span>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-medium flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-emerald-500" />
-              Margin Analysis
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {marginLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-3/4" />
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Overall Margin</span>
-                  <span className="text-sm font-medium">{formatPercent(marginData?.overallMargin || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Negative Margin Items</span>
-                  <span className={`text-sm font-medium ${(marginData?.negativeMarginItems || 0) > 0 ? 'text-red-500' : ''}`}>
-                    {(marginData?.negativeMarginItems || 0).toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Loss Value</span>
-                  <span className={`text-sm font-medium ${(marginData?.negativeMarginValue || 0) > 0 ? 'text-red-500' : ''}`}>
-                    {formatCurrency(marginData?.negativeMarginValue || 0)}
-                  </span>
-                </div>
-                <div className="pt-2 border-t">
-                  <span className="text-xs text-muted-foreground">Best: </span>
-                  <span className="text-xs font-medium">{executiveSummary?.quickInsights?.bestPerformingCategory || 'N/A'}</span>
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Net Margin</div>
+                  <div className={`text-2xl font-bold ${(strategicData?.netMargin || 0) >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                    {formatPercent(strategicData?.netMargin || 0)}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {formatCurrency(strategicData?.netProfit || 0)} net profit
+                  </div>
                 </div>
               </div>
             )}
@@ -432,65 +277,53 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      <div id="dashboard-charts" className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <RevenueChart
-          data={dashboardData?.revenueOverTime || []}
-          isLoading={dashboardLoading}
+      <div id="dashboard-waterfall" className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <ProfitabilityWaterfall 
+          data={strategicData?.profitabilityWaterfall} 
+          isLoading={strategicLoading} 
         />
-        <CategoryChart
-          data={dashboardData?.categoryBreakdown || []}
-          isLoading={dashboardLoading}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatusChart
-          data={dashboardData?.statusBreakdown || []}
-          isLoading={dashboardLoading}
-          title="Status Distribution"
-        />
-        <StatusChart
-          data={(dashboardData?.gradeBreakdown || []).map(g => ({ status: g.grade, count: g.count }))}
-          isLoading={dashboardLoading}
-          title="Grade Distribution"
-        />
-        <TopPerformers
-          data={dashboardData?.topCustomers || []}
-          title="Top Customers"
-          isLoading={dashboardLoading}
-        />
-        <TopPerformers
-          data={dashboardData?.topProducts || []}
-          title="Top Products"
-          isLoading={dashboardLoading}
+        <ReturnImpactCard
+          unitsSold={strategicData?.unitsSold || 0}
+          unitsReturned={strategicData?.unitsReturned || 0}
+          returnRate={strategicData?.returnRate || 0}
+          revenueAtRisk={0}
+          profitLost={strategicData?.returnImpact || 0}
+          grossProfit={strategicData?.grossProfit || 0}
+          netProfit={strategicData?.netProfit || 0}
+          isLoading={strategicLoading}
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <TopPerformers
-          data={dashboardData?.topVendors || []}
-          title="Top Vendors"
-          isLoading={dashboardLoading}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <CriticalAlerts 
+          alerts={strategicData?.criticalAlerts || []} 
+          isLoading={strategicLoading} 
         />
-        <TopPerformers
-          data={dashboardData?.topCustomers || []}
-          title="Top by Profit"
-          valueKey="profit"
-          isLoading={dashboardLoading}
+        <PerformanceSummary
+          topCategory={strategicData?.topPerformingCategory || { name: 'N/A', profit: 0, margin: 0 }}
+          worstCategory={strategicData?.worstPerformingCategory || { name: 'N/A', profit: 0, margin: 0 }}
+          topCustomer={strategicData?.topCustomer || { name: 'N/A', revenue: 0, margin: 0 }}
+          highestReturnProduct={strategicData?.highestReturnProduct || { name: 'N/A', returnRate: 0, lostProfit: 0 }}
+          isLoading={strategicLoading}
         />
-        <TopPerformers
-          data={dashboardData?.topProducts || []}
-          title="Top by Units"
-          valueKey="units"
-          isLoading={dashboardLoading}
+        <RegionalPerformance 
+          regions={strategicData?.regionPerformance || []} 
+          isLoading={strategicLoading} 
         />
       </div>
 
-      {executiveSummary && (
+      <div id="dashboard-trends">
+        <MonthlyTrendsChart 
+          data={strategicData?.monthlyTrends || []} 
+          isLoading={strategicLoading} 
+        />
+      </div>
+
+      {strategicData && (
         <AIInsightsPanel
-          context="executive_summary"
-          data={executiveSummary}
-          title="AI Executive Insights"
+          context="strategic_dashboard"
+          data={strategicData}
+          title="AI Strategic Insights"
         />
       )}
     </div>
