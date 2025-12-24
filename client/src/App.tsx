@@ -16,14 +16,9 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2 } from "lucide-react";
 
-import Dashboard from "@/pages/dashboard";
-import Orders from "@/pages/orders";
-import Customers from "@/pages/customers";
-import Products from "@/pages/products";
-import Inventory from "@/pages/inventory";
-import Profitability from "@/pages/profitability";
-import Reports from "@/pages/reports";
+import CommandCenter from "@/pages/command-center";
 import DataTablePage from "@/pages/data-table-page";
+import Reports from "@/pages/reports";
 import MyCollection from "@/pages/my-collection";
 import Login from "@/pages/login";
 import Admin from "@/pages/admin";
@@ -93,15 +88,10 @@ function AppRoutes() {
   return (
     <MainLayout>
       <Switch>
-        <Route path="/" component={Dashboard} />
-        <Route path="/orders" component={Orders} />
-        <Route path="/customers" component={Customers} />
-        <Route path="/products" component={Products} />
-        <Route path="/inventory" component={Inventory} />
-        <Route path="/profitability" component={Profitability} />
+        <Route path="/" component={CommandCenter} />
+        <Route path="/explore" component={DataTablePage} />
         <Route path="/reports" component={Reports} />
-        <Route path="/data-table" component={DataTablePage} />
-        <Route path="/my-collection" component={MyCollection} />
+        <Route path="/saved" component={MyCollection} />
         <Route component={NotFound} />
       </Switch>
     </MainLayout>

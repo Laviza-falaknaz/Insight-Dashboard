@@ -1773,8 +1773,38 @@ export async function registerRoutes(
   });
 
   // Product Analysis - comprehensive product insights
-  app.get("/api/insights/products", async (_req: Request, res: Response) => {
+  app.get("/api/insights/products", async (req: Request, res: Response) => {
     try {
+      // Parse filter parameters
+      const { startDate, endDate, category, make, customer, vendor, gradeCondition } = req.query;
+      
+      // Build WHERE clause conditions
+      const whereConditions: string[] = [];
+      if (startDate) whereConditions.push(`invoice_date >= '${startDate}'`);
+      if (endDate) whereConditions.push(`invoice_date <= '${endDate}'`);
+      if (category) {
+        const cats = (category as string).split(',').map(c => `'${c.replace(/'/g, "''")}'`).join(',');
+        whereConditions.push(`UPPER(category) IN (${cats.toUpperCase()})`);
+      }
+      if (make) {
+        const makes = (make as string).split(',').map(m => `'${m.replace(/'/g, "''")}'`).join(',');
+        whereConditions.push(`UPPER(make) IN (${makes.toUpperCase()})`);
+      }
+      if (customer) {
+        const customers = (customer as string).split(',').map(c => `'${c.replace(/'/g, "''")}'`).join(',');
+        whereConditions.push(`UPPER(invoicing_name) IN (${customers.toUpperCase()})`);
+      }
+      if (vendor) {
+        const vendors = (vendor as string).split(',').map(v => `'${v.replace(/'/g, "''")}'`).join(',');
+        whereConditions.push(`UPPER(vendor_name) IN (${vendors.toUpperCase()})`);
+      }
+      if (gradeCondition) {
+        const grades = (gradeCondition as string).split(',').map(g => `'${g.replace(/'/g, "''")}'`).join(',');
+        whereConditions.push(`UPPER(grade_condition) IN (${grades.toUpperCase()})`);
+      }
+      
+      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
       // Overall product metrics
       const productMetrics = await db.select({
         totalProducts: sql<number>`COUNT(DISTINCT CONCAT(${inventory.make}, '-', ${inventory.modelNum}))`,
@@ -1829,6 +1859,20 @@ export async function registerRoutes(
         .groupBy(sql`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`));
 
+      // Build filter for raw SQL (different column naming)
+      const sqlFilterConditions: string[] = [];
+      if (startDate) sqlFilterConditions.push(`invoice_date >= '${startDate}'`);
+      if (endDate) sqlFilterConditions.push(`invoice_date <= '${endDate}'`);
+      if (category) {
+        const cats = (category as string).split(',').map(c => `'${c.replace(/'/g, "''").toUpperCase()}'`).join(',');
+        sqlFilterConditions.push(`UPPER(category) IN (${cats})`);
+      }
+      if (make) {
+        const makes = (make as string).split(',').map(m => `'${m.replace(/'/g, "''").toUpperCase()}'`).join(',');
+        sqlFilterConditions.push(`UPPER(make) IN (${makes})`);
+      }
+      const sqlFilterBase = sqlFilterConditions.length > 0 ? ` AND ${sqlFilterConditions.join(' AND ')}` : '';
+
       // Return-prone products with return rates
       const returnProneProducts = await pool.query(`
         WITH product_sales AS (
@@ -1838,7 +1882,7 @@ export async function registerRoutes(
             COALESCE(SUM(CAST(final_sales_price_usd AS numeric)), 0) as revenue,
             COALESCE(SUM(CAST(final_total_cost_usd AS numeric)), 0) as cost
           FROM inventory 
-          WHERE trans_type = 'SalesOrder'
+          WHERE trans_type = 'SalesOrder' ${sqlFilterBase}
           GROUP BY CONCAT(UPPER(make), ' ', UPPER(model_num))
           HAVING COUNT(*) >= 5
         ),
@@ -1852,7 +1896,7 @@ export async function registerRoutes(
             i.invent_serial_id = r.serial_id AND
             i.data_area_id = r.area_id AND
             i.item_id = r.item_id
-          WHERE i.trans_type = 'SalesOrder'
+          WHERE i.trans_type = 'SalesOrder' ${sqlFilterBase.replace(/invoice_date/g, 'i.invoice_date').replace(/category/g, 'i.category').replace(/make/g, 'i.make')}
           GROUP BY CONCAT(UPPER(i.make), ' ', UPPER(i.model_num))
         )
         SELECT 
@@ -1887,7 +1931,7 @@ export async function registerRoutes(
                   SUM(CAST(final_sales_price_usd AS numeric))) * 100 
             ELSE 0 END as margin
         FROM inventory 
-        WHERE trans_type = 'SalesOrder'
+        WHERE trans_type = 'SalesOrder' ${sqlFilterBase}
         GROUP BY CONCAT(UPPER(make), ' ', UPPER(model_num))
         HAVING COUNT(*) >= 5
         ORDER BY revenue DESC
@@ -1907,7 +1951,7 @@ export async function registerRoutes(
                   SUM(CAST(final_sales_price_usd AS numeric))) * 100 
             ELSE 0 END as margin
         FROM inventory 
-        WHERE trans_type = 'SalesOrder'
+        WHERE trans_type = 'SalesOrder' ${sqlFilterBase}
         GROUP BY CONCAT(UPPER(make), ' ', UPPER(model_num))
         HAVING SUM(CAST(final_sales_price_usd AS numeric)) - SUM(CAST(final_total_cost_usd AS numeric)) < 0
         ORDER BY profit ASC
