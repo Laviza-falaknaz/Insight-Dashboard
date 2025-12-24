@@ -5,17 +5,47 @@ import { z } from "zod";
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
+  email: text("email").notNull().unique(),
   password: text("password").notNull(),
+  themeId: text("theme_id").default("bootstrap"),
+  isAdmin: text("is_admin").default("false"),
+  createdAt: timestamp("created_at").defaultNow(),
+  lastLogin: timestamp("last_login"),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
+  email: true,
   password: true,
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+// Theme presets - 5 colors each (primary, info, success, warning, danger)
+export const themePresets = {
+  bootstrap: {
+    name: "Bootstrap",
+    colors: ["#337ab7", "#5bc0de", "#5cb85c", "#f0ad4e", "#d9534f"],
+  },
+  ocean: {
+    name: "Ocean",
+    colors: ["#0077b6", "#00b4d8", "#2a9d8f", "#e9c46a", "#e76f51"],
+  },
+  forest: {
+    name: "Forest",
+    colors: ["#2d6a4f", "#40916c", "#52b788", "#b7e4c7", "#d62828"],
+  },
+  sunset: {
+    name: "Sunset",
+    colors: ["#ff6b35", "#f7c59f", "#efa00b", "#d65108", "#591f0a"],
+  },
+  midnight: {
+    name: "Midnight",
+    colors: ["#6366f1", "#8b5cf6", "#a855f7", "#f59e0b", "#ef4444"],
+  },
+} as const;
+
+export type ThemeId = keyof typeof themePresets;
 
 // Inventory table for local PostgreSQL storage
 export const inventory = pgTable("inventory", {
