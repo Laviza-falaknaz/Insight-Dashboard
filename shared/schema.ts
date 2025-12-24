@@ -102,7 +102,7 @@ export const inventory = pgTable("inventory", {
   resolution: text("resolution"),
   modelNum: text("model_num"),
   invoiceAccount: text("invoice_account"),
-  totalCostCurUSD: numeric("total_cost_cur_usd", { precision: 18, scale: 2 }),
+  totalCostCurUSD: text("total_cost_cur_usd"),
   salesOrderDate: text("sales_order_date"),
   customerRef: text("customer_ref"),
   crmRef: text("crm_ref"),
