@@ -795,15 +795,15 @@ export async function registerRoutes(
         units: Number(r.units),
       }));
 
-      // Get category breakdown
+      // Get category breakdown (case-insensitive grouping)
       const categoryResult = await db.select({
-        category: inventory.category,
+        category: sql<string>`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         profit: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)) - SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
         units: count(),
       }).from(inventory)
         .where(whereCondition)
-        .groupBy(inventory.category)
+        .groupBy(sql`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`));
 
       const categoryBreakdown: CategoryBreakdown[] = categoryResult.map(c => ({
@@ -814,16 +814,16 @@ export async function registerRoutes(
         count: Number(c.units),
       }));
 
-      // Get top customers
+      // Get top customers (case-insensitive grouping)
       const customerResult = await db.select({
-        name: inventory.invoicingName,
+        name: sql<string>`UPPER(${inventory.invoicingName})`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         profit: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)) - SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
         units: count(),
         orderCount: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
       }).from(inventory)
         .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, ""), whereCondition))
-        .groupBy(inventory.invoicingName)
+        .groupBy(sql`UPPER(${inventory.invoicingName})`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(10);
 
@@ -835,16 +835,16 @@ export async function registerRoutes(
         count: Number(c.orderCount),
       }));
 
-      // Get top products (by Make + Model)
+      // Get top products (by Make + Model, case-insensitive grouping)
       const productResult = await db.select({
-        make: inventory.make,
-        model: inventory.modelNum,
+        make: sql<string>`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`,
+        model: sql<string>`UPPER(COALESCE(${inventory.modelNum}, ''))`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         profit: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)) - SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
         units: count(),
       }).from(inventory)
         .where(whereCondition)
-        .groupBy(inventory.make, inventory.modelNum)
+        .groupBy(sql`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`, sql`UPPER(COALESCE(${inventory.modelNum}, ''))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(10);
 
@@ -856,15 +856,15 @@ export async function registerRoutes(
         count: Number(p.units),
       }));
 
-      // Get top vendors
+      // Get top vendors (case-insensitive grouping)
       const vendorResult = await db.select({
-        name: inventory.vendName,
+        name: sql<string>`UPPER(${inventory.vendName})`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         profit: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)) - SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
         units: count(),
       }).from(inventory)
         .where(and(isNotNull(inventory.vendName), ne(inventory.vendName, ""), whereCondition))
-        .groupBy(inventory.vendName)
+        .groupBy(sql`UPPER(${inventory.vendName})`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(10);
 
@@ -876,13 +876,13 @@ export async function registerRoutes(
         count: Number(v.units),
       }));
 
-      // Get status breakdown
+      // Get status breakdown (case-insensitive grouping)
       const statusResult = await db.select({
-        status: inventory.status,
+        status: sql<string>`UPPER(COALESCE(${inventory.status}, 'UNKNOWN'))`,
         statusCount: count(),
       }).from(inventory)
         .where(whereCondition)
-        .groupBy(inventory.status)
+        .groupBy(sql`UPPER(COALESCE(${inventory.status}, 'UNKNOWN'))`)
         .orderBy(desc(count()));
 
       const statusBreakdown = statusResult.map(s => ({
@@ -890,13 +890,13 @@ export async function registerRoutes(
         count: Number(s.statusCount),
       }));
 
-      // Get grade breakdown
+      // Get grade breakdown (case-insensitive grouping)
       const gradeResult = await db.select({
-        grade: inventory.gradeCondition,
+        grade: sql<string>`UPPER(COALESCE(${inventory.gradeCondition}, 'UNKNOWN'))`,
         gradeCount: count(),
       }).from(inventory)
         .where(whereCondition)
-        .groupBy(inventory.gradeCondition)
+        .groupBy(sql`UPPER(COALESCE(${inventory.gradeCondition}, 'UNKNOWN'))`)
         .orderBy(desc(count()));
 
       const gradeBreakdown = gradeResult.map(g => ({
@@ -922,18 +922,18 @@ export async function registerRoutes(
     }
   });
 
-  // Get customer analytics
+  // Get customer analytics (case-insensitive grouping)
   app.get("/api/analytics/customers", async (_req: Request, res: Response) => {
     try {
       const topCustomers = await db.select({
-        name: inventory.invoicingName,
+        name: sql<string>`UPPER(${inventory.invoicingName})`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         profit: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)) - SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
         units: count(),
         orderCount: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
       }).from(inventory)
         .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
-        .groupBy(inventory.invoicingName)
+        .groupBy(sql`UPPER(${inventory.invoicingName})`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(50);
 
@@ -964,27 +964,27 @@ export async function registerRoutes(
     }
   });
 
-  // Get product analytics
+  // Get product analytics (case-insensitive grouping)
   app.get("/api/analytics/products", async (_req: Request, res: Response) => {
     try {
       const topProducts = await db.select({
-        make: inventory.make,
-        model: inventory.modelNum,
+        make: sql<string>`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`,
+        model: sql<string>`UPPER(COALESCE(${inventory.modelNum}, ''))`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         profit: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)) - SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
         units: count(),
       }).from(inventory)
-        .groupBy(inventory.make, inventory.modelNum)
+        .groupBy(sql`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`, sql`UPPER(COALESCE(${inventory.modelNum}, ''))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(50);
 
       const categoryBreakdown = await db.select({
-        category: inventory.category,
+        category: sql<string>`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         profit: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)) - SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
         units: count(),
       }).from(inventory)
-        .groupBy(inventory.category)
+        .groupBy(sql`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`));
 
       const totals = await db.select({
@@ -1038,25 +1038,25 @@ export async function registerRoutes(
       const totalCost = Number(freightTotals[0]?.totalCost) || 0;
       const itemCount = Number(freightTotals[0]?.itemCount) || 0;
 
-      // Freight by supplier
+      // Freight by supplier (case-insensitive grouping)
       const freightBySupplier = await db.select({
-        supplier: inventory.vendName,
+        supplier: sql<string>`UPPER(${inventory.vendName})`,
         cost: sql<number>`COALESCE(SUM(CAST(${inventory.freightChargesUSD} as numeric)), 0)`,
         itemCount: count(),
       }).from(inventory)
         .where(and(isNotNull(inventory.vendName), ne(inventory.vendName, "")))
-        .groupBy(inventory.vendName)
+        .groupBy(sql`UPPER(${inventory.vendName})`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.freightChargesUSD} as numeric)), 0)`))
         .limit(20);
 
-      // Freight by category
+      // Freight by category (case-insensitive grouping)
       const freightByCategory = await db.select({
-        category: inventory.category,
+        category: sql<string>`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`,
         cost: sql<number>`COALESCE(SUM(CAST(${inventory.freightChargesUSD} as numeric)), 0)`,
         itemCount: count(),
       }).from(inventory)
         .where(and(isNotNull(inventory.category), ne(inventory.category, "")))
-        .groupBy(inventory.category)
+        .groupBy(sql`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.freightChargesUSD} as numeric)), 0)`))
         .limit(15);
 
@@ -1199,8 +1199,8 @@ export async function registerRoutes(
             slowMovingValue += cost;
           }
 
-          // Category aging
-          const cat = item.category || 'Unknown';
+          // Category aging (case-insensitive grouping)
+          const cat = (item.category || 'Unknown').toUpperCase();
           if (!categoryAging[cat]) {
             categoryAging[cat] = { value: 0, days: 0, count: 0 };
           }
@@ -1391,24 +1391,24 @@ export async function registerRoutes(
       const overallProfit = totalRevenue - totalCost;
       const overallMargin = totalRevenue > 0 ? (overallProfit / totalRevenue) * 100 : 0;
 
-      // Margin by category
+      // Margin by category (case-insensitive grouping)
       const marginByCategory = await db.select({
-        category: inventory.category,
+        category: sql<string>`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
       }).from(inventory)
         .where(and(isNotNull(inventory.category), ne(inventory.category, "")))
-        .groupBy(inventory.category)
+        .groupBy(sql`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`));
 
-      // Margin by make
+      // Margin by make (case-insensitive grouping)
       const marginByMake = await db.select({
-        make: inventory.make,
+        make: sql<string>`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
       }).from(inventory)
         .where(and(isNotNull(inventory.make), ne(inventory.make, "")))
-        .groupBy(inventory.make)
+        .groupBy(sql`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(15);
 
@@ -1540,25 +1540,25 @@ export async function registerRoutes(
         .orderBy(sql`TO_CHAR(TO_DATE(${inventory.invoiceDate}, 'YYYY-MM-DD'), 'YYYY-MM')`)
         .limit(12);
 
-      // Orders by customer
+      // Orders by customer (case-insensitive grouping)
       const ordersByCustomer = await db.select({
-        customer: inventory.invoicingName,
+        customer: sql<string>`UPPER(${inventory.invoicingName})`,
         orders: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
       }).from(inventory)
         .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
-        .groupBy(inventory.invoicingName)
+        .groupBy(sql`UPPER(${inventory.invoicingName})`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(15);
 
-      // Orders by status
+      // Orders by status (case-insensitive grouping)
       const ordersByStatus = await db.select({
-        status: inventory.status,
+        status: sql<string>`UPPER(COALESCE(${inventory.status}, 'UNKNOWN'))`,
         count: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
       }).from(inventory)
-        .groupBy(inventory.status)
+        .groupBy(sql`UPPER(COALESCE(${inventory.status}, 'UNKNOWN'))`)
         .orderBy(desc(sql`COUNT(DISTINCT ${inventory.salesId})`));
 
       // Top orders by value
@@ -1629,39 +1629,39 @@ export async function registerRoutes(
       const totalCustomers = Number(customerMetrics[0]?.totalCustomers) || 0;
       const totalRevenue = Number(customerMetrics[0]?.totalRevenue) || 0;
 
-      // Top customers by revenue
+      // Top customers by revenue (case-insensitive grouping)
       const topByRevenue = await db.select({
-        customer: inventory.invoicingName,
+        customer: sql<string>`UPPER(${inventory.invoicingName})`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
         orders: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
       }).from(inventory)
         .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
-        .groupBy(inventory.invoicingName)
+        .groupBy(sql`UPPER(${inventory.invoicingName})`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(15);
 
-      // Top customers by profit
+      // Top customers by profit (case-insensitive grouping)
       const topByProfit = await db.select({
-        customer: inventory.invoicingName,
+        customer: sql<string>`UPPER(${inventory.invoicingName})`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
         orders: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
       }).from(inventory)
         .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
-        .groupBy(inventory.invoicingName)
+        .groupBy(sql`UPPER(${inventory.invoicingName})`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0) - COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`))
         .limit(15);
 
-      // Top customers by volume
+      // Top customers by volume (case-insensitive grouping)
       const topByVolume = await db.select({
-        customer: inventory.invoicingName,
+        customer: sql<string>`UPPER(${inventory.invoicingName})`,
         units: count(),
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         orders: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
       }).from(inventory)
         .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
-        .groupBy(inventory.invoicingName)
+        .groupBy(sql`UPPER(${inventory.invoicingName})`)
         .orderBy(desc(count()))
         .limit(15);
 
@@ -1725,49 +1725,49 @@ export async function registerRoutes(
       const totalProducts = Number(productMetrics[0]?.totalProducts) || 0;
       const totalRevenue = Number(productMetrics[0]?.totalRevenue) || 0;
 
-      // Top products by revenue
+      // Top products by revenue (case-insensitive grouping)
       const topByRevenue = await db.select({
-        make: inventory.make,
-        model: inventory.modelNum,
+        make: sql<string>`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`,
+        model: sql<string>`UPPER(COALESCE(${inventory.modelNum}, ''))`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
         units: count(),
       }).from(inventory)
-        .groupBy(inventory.make, inventory.modelNum)
+        .groupBy(sql`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`, sql`UPPER(COALESCE(${inventory.modelNum}, ''))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(15);
 
-      // Top products by profit
+      // Top products by profit (case-insensitive grouping)
       const topByProfit = await db.select({
-        make: inventory.make,
-        model: inventory.modelNum,
+        make: sql<string>`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`,
+        model: sql<string>`UPPER(COALESCE(${inventory.modelNum}, ''))`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
         units: count(),
       }).from(inventory)
-        .groupBy(inventory.make, inventory.modelNum)
+        .groupBy(sql`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`, sql`UPPER(COALESCE(${inventory.modelNum}, ''))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0) - COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`))
         .limit(15);
 
-      // Top products by volume
+      // Top products by volume (case-insensitive grouping)
       const topByVolume = await db.select({
-        make: inventory.make,
-        model: inventory.modelNum,
+        make: sql<string>`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`,
+        model: sql<string>`UPPER(COALESCE(${inventory.modelNum}, ''))`,
         units: count(),
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
       }).from(inventory)
-        .groupBy(inventory.make, inventory.modelNum)
+        .groupBy(sql`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`, sql`UPPER(COALESCE(${inventory.modelNum}, ''))`)
         .orderBy(desc(count()))
         .limit(15);
 
-      // Products by category
+      // Products by category (case-insensitive grouping)
       const productsByCategory = await db.select({
-        category: inventory.category,
-        products: sql<number>`COUNT(DISTINCT CONCAT(${inventory.make}, '-', ${inventory.modelNum}))`,
+        category: sql<string>`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`,
+        products: sql<number>`COUNT(DISTINCT CONCAT(UPPER(COALESCE(${inventory.make}, '')), '-', UPPER(COALESCE(${inventory.modelNum}, ''))))`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         units: count(),
       }).from(inventory)
-        .groupBy(inventory.category)
+        .groupBy(sql`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`));
 
       res.json({
@@ -1837,23 +1837,23 @@ export async function registerRoutes(
       const unitsSold = Number(kpiResult[0]?.unitsSold) || 0;
       const totalOrders = Number(kpiResult[0]?.totalOrders) || 0;
 
-      // Best/worst performing categories
+      // Best/worst performing categories (case-insensitive grouping)
       const categoryPerformance = await db.select({
-        category: inventory.category,
+        category: sql<string>`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
         cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
       }).from(inventory)
         .where(and(isNotNull(inventory.category), ne(inventory.category, "")))
-        .groupBy(inventory.category)
+        .groupBy(sql`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0) - COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`));
 
-      // Top customer
+      // Top customer (case-insensitive grouping)
       const topCustomer = await db.select({
-        customer: inventory.invoicingName,
+        customer: sql<string>`UPPER(${inventory.invoicingName})`,
         revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
       }).from(inventory)
         .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
-        .groupBy(inventory.invoicingName)
+        .groupBy(sql`UPPER(${inventory.invoicingName})`)
         .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
         .limit(1);
 
