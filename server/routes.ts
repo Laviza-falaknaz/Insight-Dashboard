@@ -373,7 +373,9 @@ export async function registerRoutes(
       }
 
       let totalProcessed = 0;
-      const batchSize = 1000; // Increased batch size for better throughput
+      // PostgreSQL has ~65535 parameter limit. With 66 columns, max rows = 65535/66 ≈ 993
+      // Use 500 to stay safely under the limit
+      const batchSize = 500;
       const columns = [
         'data_area_id', 'item_id', 'invent_serial_id', 'deal_ref', 'purch_price_usd',
         'purch_date', 'vend_comments', 'key_lang', 'os_sticker', 'display_size',
@@ -402,7 +404,7 @@ export async function registerRoutes(
           const batch = items.slice(i, i + batchSize).filter((item: Record<string, unknown>) => item.InventSerialId);
           if (batch.length === 0) continue;
           
-          const values: unknown[] = [];
+          const allValues: unknown[] = [];
           const valuePlaceholders: string[] = [];
           let paramIndex = 1;
           
@@ -480,7 +482,9 @@ export async function registerRoutes(
               item.WarrantyDescription || null,
             ];
             
-            values.push(...rowValues);
+            for (const val of rowValues) {
+              allValues.push(val);
+            }
             const placeholders = rowValues.map(() => `$${paramIndex++}`);
             valuePlaceholders.push(`(${placeholders.join(', ')})`);
           }
@@ -510,7 +514,7 @@ export async function registerRoutes(
                OR inventory.invoice_date IS DISTINCT FROM EXCLUDED.invoice_date
           `;
           
-          await client.query(query, values);
+          await client.query(query, allValues);
           totalProcessed += batch.length;
         }
         
