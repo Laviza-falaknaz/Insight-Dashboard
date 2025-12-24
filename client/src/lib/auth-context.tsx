@@ -63,9 +63,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const updateTheme = async (themeId: string) => {
-    await apiRequest("PATCH", "/api/auth/theme", { themeId });
-    if (user) {
-      setUser({ ...user, themeId });
+    try {
+      await apiRequest("PATCH", "/api/auth/theme", { themeId });
+      if (user) {
+        setUser({ ...user, themeId });
+      }
+    } catch (error) {
+      // Session expired - clear user state
+      if (error instanceof Error && error.message.includes("401")) {
+        setUser(null);
+        throw new Error("Session expired. Please log in again.");
+      }
+      throw error;
     }
   };
 

@@ -15,13 +15,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { User, LogOut, Palette, Shield } from "lucide-react";
+import { LogOut, Palette, Shield } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { themePresets, type ThemePreset, type ThemeId } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
 
 export function UserMenu() {
   const { user, logout, updateTheme } = useAuth();
   const [, setLocation] = useLocation();
+  const { toast } = useToast();
 
   const { data: themes } = useQuery<Record<ThemeId, ThemePreset>>({
     queryKey: ["/api/themes"],
@@ -35,7 +37,16 @@ export function UserMenu() {
   };
 
   const handleThemeChange = async (themeId: string) => {
-    await updateTheme(themeId);
+    try {
+      await updateTheme(themeId);
+    } catch (error) {
+      toast({
+        title: "Session Expired",
+        description: "Please log in again to continue.",
+        variant: "destructive",
+      });
+      setLocation("/login");
+    }
   };
 
   const getInitials = (email: string) => {
