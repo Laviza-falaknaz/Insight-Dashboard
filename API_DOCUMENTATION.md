@@ -634,12 +634,14 @@ Triggers a full database refresh via Power Automate. This is a schedulable endpo
 
 **Power Automate Request Format:**
 ```json
-// For Inventory
-{ "table": "Inventory", "query": "SELECT * FROM Inventory" }
+// For Inventory (paginated - 50k records per request to stay under 104MB buffer)
+{ "table": "Inventory", "query": "SELECT * FROM Inventory ORDER BY InventSerialId OFFSET 0 ROWS FETCH NEXT 50000 ROWS ONLY" }
 
-// For RMAs
+// For RMAs (single request - typically smaller dataset)
 { "table": "RMAs", "query": "SELECT * FROM RMAs" }
 ```
+
+**Note:** Inventory data (3M+ records) is fetched in paginated chunks of 50,000 records to avoid Power Automate's 104MB buffer limit. Each chunk is then batch-inserted into PostgreSQL in 500-record batches.
 
 **Response:** Returns immediately with status, processes in background
 

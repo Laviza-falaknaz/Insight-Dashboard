@@ -916,161 +916,190 @@ export async function registerRoutes(
     (async () => {
       try {
         const BATCH_SIZE = 500;
+        const PAGE_SIZE = 50000; // Fetch 50k records at a time to stay under 104MB buffer
         
-        // ---- FETCH AND INGEST INVENTORY ----
-        console.log("[Refresh] Fetching inventory data via Power Automate...");
+        // ---- FETCH AND INGEST INVENTORY (PAGINATED) ----
+        console.log("[Refresh] Fetching inventory data via Power Automate (paginated)...");
         refreshStatus.lastMessage = "Fetching inventory data...";
         
-        const inventoryResponse = await fetch(POWER_AUTOMATE_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ table: "Inventory", query: "SELECT * FROM Inventory" }),
-        });
-        
-        if (!inventoryResponse.ok) {
-          throw new Error(`Inventory fetch failed: ${inventoryResponse.status} ${inventoryResponse.statusText}`);
-        }
-        
-        const inventoryData = await inventoryResponse.json();
-        const inventoryRows = Array.isArray(inventoryData) ? inventoryData : (inventoryData.value || inventoryData.data || []);
-        console.log(`[Refresh] Fetched ${inventoryRows.length} inventory records`);
-        refreshStatus.lastMessage = `Ingesting ${inventoryRows.length} inventory records...`;
-        
         let inventoryProcessed = 0;
+        let pageOffset = 0;
+        let hasMoreInventory = true;
         
-        for (let i = 0; i < inventoryRows.length; i += BATCH_SIZE) {
-          const batch = inventoryRows.slice(i, i + BATCH_SIZE);
+        while (hasMoreInventory) {
+          const paginatedQuery = `SELECT * FROM Inventory ORDER BY InventSerialId OFFSET ${pageOffset} ROWS FETCH NEXT ${PAGE_SIZE} ROWS ONLY`;
           
-          const columns = [
-            'data_area_id', 'item_id', 'invent_serial_id', 'deal_ref', 'purch_price_usd',
-            'purch_date', 'vend_comments', 'key_lang', 'os_sticker', 'display_size',
-            'lcd_cost_usd', 'storage_serial_num', 'vend_name', 'category', 'made_in',
-            'grade_condition', 'parts_cost_usd', 'fingerprint_str', 'misc_cost_usd',
-            'processor_gen', 'manufacturing_date', 'purchase_category', 'key_layout',
-            'po_number', 'make', 'processor', 'packaging_cost_usd', 'received_date',
-            'itad_trees_cost_usd', 'storage_type', 'sold_as_hdd', 'standardisation_cost_usd',
-            'comments', 'purch_price_revised_usd', 'status', 'consumable_cost_usd',
-            'chassis', 'journal_num', 'battery_cost_usd', 'ram', 'sold_as_ram',
-            'freight_charges_usd', 'hdd', 'coa_cost_usd', 'manufacturer_serial_num',
-            'supplier_pallet_num', 'resource_cost_usd', 'customs_duty_usd', 'resolution',
-            'model_num', 'invoice_account', 'total_cost_cur_usd', 'sales_order_date',
-            'customer_ref', 'crm_ref', 'invoicing_name', 'trans_type', 'sales_invoice_id',
-            'sales_id', 'invoice_date', 'apin_number', 'segregation', 'final_sales_price_usd',
-            'final_total_cost_usd', 'order_taker', 'order_responsible', 'product_specification',
-            'warranty_start_date', 'warranty_end_date', 'warranty_description'
-          ];
+          console.log(`[Refresh] Fetching inventory page: offset ${pageOffset}, limit ${PAGE_SIZE}`);
+          refreshStatus.lastMessage = `Fetching inventory records (offset: ${pageOffset})...`;
           
-          const values: unknown[] = [];
-          const valuePlaceholders: string[] = [];
-          let paramIndex = 1;
+          const inventoryResponse = await fetch(POWER_AUTOMATE_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ table: "Inventory", query: paginatedQuery }),
+          });
           
-          for (const item of batch) {
-            const rowValues = [
-              item.dataAreaId || null,
-              item.ItemId || null,
-              item.InventSerialId || null,
-              item.DealRef || null,
-              item.PurchPriceUSD?.toString() || null,
-              item.PurchDate || null,
-              item.VendComments || null,
-              item.KeyLang || null,
-              item.OsSticker || null,
-              item.DisplaySize || null,
-              item.LCDCostUSD?.toString() || null,
-              item.StorageSerialNum || null,
-              item.VendName || null,
-              item.Category || null,
-              item.MadeIn || null,
-              item.GradeCondition || null,
-              item.PartsCostUSD?.toString() || null,
-              item.FingerprintStr || null,
-              item.MiscCostUSD?.toString() || null,
-              item.ProcessorGen || null,
-              item.ManufacturingDate || null,
-              item.PurchaseCategory || null,
-              item.KeyLayout || null,
-              item.PONumber || null,
-              item.Make || null,
-              item.Processor || null,
-              item.PackagingCostUSD?.toString() || null,
-              item.ReceivedDate || null,
-              item.ITADTreesCostUSD?.toString() || null,
-              item.StorageType || null,
-              item.SoldAsHDD || null,
-              item.StandardisationCostUSD?.toString() || null,
-              item.Comments || null,
-              item.PurchPriceRevisedUSD?.toString() || null,
-              item.Status || null,
-              item.ConsumableCostUSD?.toString() || null,
-              item.Chassis || null,
-              item.JournalNum || null,
-              item.BatteryCostUSD?.toString() || null,
-              item.Ram || null,
-              item.SoldAsRAM || null,
-              item.FreightChargesUSD?.toString() || null,
-              item.HDD || null,
-              item.COACostUSD?.toString() || null,
-              item.ManufacturerSerialNum || null,
-              item.SupplierPalletNum || null,
-              item.ResourceCostUSD?.toString() || null,
-              item.CustomsDutyUSD?.toString() || null,
-              item.Resolution || null,
-              item.ModelNum || null,
-              item.InvoiceAccount || null,
-              item.TotalCostCurUSD?.toString() || null,
-              item.SalesOrderDate || null,
-              item.CustomerRef || null,
-              item.CRMRef || null,
-              item.InvoicingName || null,
-              item.TransType || null,
-              item.SalesInvoiceId || null,
-              item.SalesId || null,
-              item.InvoiceDate || null,
-              item.APINNumber || null,
-              item.Segregation || null,
-              item.FinalSalesPriceUSD?.toString() || null,
-              item.FinalTotalCostUSD?.toString() || null,
-              item.OrderTaker || null,
-              item.OrderResponsible || null,
-              item.ProductSpecification || null,
-              item.WarrantyStartDate || null,
-              item.WarrantyEndDate || null,
-              item.WarrantyDescription || null,
-            ];
-            
-            values.push(...rowValues);
-            const placeholders = rowValues.map(() => `$${paramIndex++}`);
-            valuePlaceholders.push(`(${placeholders.join(', ')})`);
+          if (!inventoryResponse.ok) {
+            const errorText = await inventoryResponse.text();
+            throw new Error(`Inventory fetch failed: ${inventoryResponse.status} - ${errorText}`);
           }
           
-          const query = `
-            INSERT INTO inventory (${columns.join(', ')})
-            VALUES ${valuePlaceholders.join(', ')}
-            ON CONFLICT (invent_serial_id, data_area_id, item_id, sales_id, trans_type) DO UPDATE SET
-              deal_ref = EXCLUDED.deal_ref,
-              purch_price_usd = EXCLUDED.purch_price_usd,
-              purch_date = EXCLUDED.purch_date,
-              vend_comments = EXCLUDED.vend_comments,
-              vend_name = EXCLUDED.vend_name,
-              category = EXCLUDED.category,
-              grade_condition = EXCLUDED.grade_condition,
-              make = EXCLUDED.make,
-              status = EXCLUDED.status,
-              invoicing_name = EXCLUDED.invoicing_name,
-              invoice_date = EXCLUDED.invoice_date,
-              final_sales_price_usd = EXCLUDED.final_sales_price_usd,
-              final_total_cost_usd = EXCLUDED.final_total_cost_usd,
-              model_num = EXCLUDED.model_num,
-              trans_type = EXCLUDED.trans_type,
-              sales_id = EXCLUDED.sales_id
-          `;
+          const inventoryData = await inventoryResponse.json();
+          const inventoryRows = Array.isArray(inventoryData) ? inventoryData : (inventoryData.value || inventoryData.data || []);
           
-          await pool.query(query, values);
-          inventoryProcessed += batch.length;
-          refreshStatus.inventoryCount = inventoryProcessed;
-          refreshStatus.lastMessage = `Inventory: ${inventoryProcessed}/${inventoryRows.length} processed`;
-          console.log(`[Refresh] Inventory batch ${Math.floor(i/BATCH_SIZE) + 1}: ${inventoryProcessed}/${inventoryRows.length}`);
+          console.log(`[Refresh] Fetched ${inventoryRows.length} inventory records (page offset: ${pageOffset})`);
+          
+          if (inventoryRows.length === 0) {
+            hasMoreInventory = false;
+            break;
+          }
+          
+          refreshStatus.lastMessage = `Ingesting inventory batch (offset: ${pageOffset}, count: ${inventoryRows.length})...`;
+          
+          // Process this page in batches of 500
+          for (let i = 0; i < inventoryRows.length; i += BATCH_SIZE) {
+            const batch = inventoryRows.slice(i, i + BATCH_SIZE);
+            
+            const columns = [
+              'data_area_id', 'item_id', 'invent_serial_id', 'deal_ref', 'purch_price_usd',
+              'purch_date', 'vend_comments', 'key_lang', 'os_sticker', 'display_size',
+              'lcd_cost_usd', 'storage_serial_num', 'vend_name', 'category', 'made_in',
+              'grade_condition', 'parts_cost_usd', 'fingerprint_str', 'misc_cost_usd',
+              'processor_gen', 'manufacturing_date', 'purchase_category', 'key_layout',
+              'po_number', 'make', 'processor', 'packaging_cost_usd', 'received_date',
+              'itad_trees_cost_usd', 'storage_type', 'sold_as_hdd', 'standardisation_cost_usd',
+              'comments', 'purch_price_revised_usd', 'status', 'consumable_cost_usd',
+              'chassis', 'journal_num', 'battery_cost_usd', 'ram', 'sold_as_ram',
+              'freight_charges_usd', 'hdd', 'coa_cost_usd', 'manufacturer_serial_num',
+              'supplier_pallet_num', 'resource_cost_usd', 'customs_duty_usd', 'resolution',
+              'model_num', 'invoice_account', 'total_cost_cur_usd', 'sales_order_date',
+              'customer_ref', 'crm_ref', 'invoicing_name', 'trans_type', 'sales_invoice_id',
+              'sales_id', 'invoice_date', 'apin_number', 'segregation', 'final_sales_price_usd',
+              'final_total_cost_usd', 'order_taker', 'order_responsible', 'product_specification',
+              'warranty_start_date', 'warranty_end_date', 'warranty_description'
+            ];
+            
+            const values: unknown[] = [];
+            const valuePlaceholders: string[] = [];
+            let paramIndex = 1;
+            
+            for (const item of batch) {
+              const rowValues = [
+                item.dataAreaId || null,
+                item.ItemId || null,
+                item.InventSerialId || null,
+                item.DealRef || null,
+                item.PurchPriceUSD?.toString() || null,
+                item.PurchDate || null,
+                item.VendComments || null,
+                item.KeyLang || null,
+                item.OsSticker || null,
+                item.DisplaySize || null,
+                item.LCDCostUSD?.toString() || null,
+                item.StorageSerialNum || null,
+                item.VendName || null,
+                item.Category || null,
+                item.MadeIn || null,
+                item.GradeCondition || null,
+                item.PartsCostUSD?.toString() || null,
+                item.FingerprintStr || null,
+                item.MiscCostUSD?.toString() || null,
+                item.ProcessorGen || null,
+                item.ManufacturingDate || null,
+                item.PurchaseCategory || null,
+                item.KeyLayout || null,
+                item.PONumber || null,
+                item.Make || null,
+                item.Processor || null,
+                item.PackagingCostUSD?.toString() || null,
+                item.ReceivedDate || null,
+                item.ITADTreesCostUSD?.toString() || null,
+                item.StorageType || null,
+                item.SoldAsHDD || null,
+                item.StandardisationCostUSD?.toString() || null,
+                item.Comments || null,
+                item.PurchPriceRevisedUSD?.toString() || null,
+                item.Status || null,
+                item.ConsumableCostUSD?.toString() || null,
+                item.Chassis || null,
+                item.JournalNum || null,
+                item.BatteryCostUSD?.toString() || null,
+                item.Ram || null,
+                item.SoldAsRAM || null,
+                item.FreightChargesUSD?.toString() || null,
+                item.HDD || null,
+                item.COACostUSD?.toString() || null,
+                item.ManufacturerSerialNum || null,
+                item.SupplierPalletNum || null,
+                item.ResourceCostUSD?.toString() || null,
+                item.CustomsDutyUSD?.toString() || null,
+                item.Resolution || null,
+                item.ModelNum || null,
+                item.InvoiceAccount || null,
+                item.TotalCostCurUSD?.toString() || null,
+                item.SalesOrderDate || null,
+                item.CustomerRef || null,
+                item.CRMRef || null,
+                item.InvoicingName || null,
+                item.TransType || null,
+                item.SalesInvoiceId || null,
+                item.SalesId || null,
+                item.InvoiceDate || null,
+                item.APINNumber || null,
+                item.Segregation || null,
+                item.FinalSalesPriceUSD?.toString() || null,
+                item.FinalTotalCostUSD?.toString() || null,
+                item.OrderTaker || null,
+                item.OrderResponsible || null,
+                item.ProductSpecification || null,
+                item.WarrantyStartDate || null,
+                item.WarrantyEndDate || null,
+                item.WarrantyDescription || null,
+              ];
+              
+              values.push(...rowValues);
+              const placeholders = rowValues.map(() => `$${paramIndex++}`);
+              valuePlaceholders.push(`(${placeholders.join(', ')})`);
+            }
+            
+            const query = `
+              INSERT INTO inventory (${columns.join(', ')})
+              VALUES ${valuePlaceholders.join(', ')}
+              ON CONFLICT (invent_serial_id, data_area_id, item_id, sales_id, trans_type) DO UPDATE SET
+                deal_ref = EXCLUDED.deal_ref,
+                purch_price_usd = EXCLUDED.purch_price_usd,
+                purch_date = EXCLUDED.purch_date,
+                vend_comments = EXCLUDED.vend_comments,
+                vend_name = EXCLUDED.vend_name,
+                category = EXCLUDED.category,
+                grade_condition = EXCLUDED.grade_condition,
+                make = EXCLUDED.make,
+                status = EXCLUDED.status,
+                invoicing_name = EXCLUDED.invoicing_name,
+                invoice_date = EXCLUDED.invoice_date,
+                final_sales_price_usd = EXCLUDED.final_sales_price_usd,
+                final_total_cost_usd = EXCLUDED.final_total_cost_usd,
+                model_num = EXCLUDED.model_num,
+                trans_type = EXCLUDED.trans_type,
+                sales_id = EXCLUDED.sales_id
+            `;
+            
+            await pool.query(query, values);
+            inventoryProcessed += batch.length;
+            refreshStatus.inventoryCount = inventoryProcessed;
+            refreshStatus.lastMessage = `Inventory: ${inventoryProcessed} processed (page offset: ${pageOffset})`;
+            console.log(`[Refresh] Inventory batch: ${inventoryProcessed} total processed`);
+          }
+          
+          // Move to next page
+          pageOffset += PAGE_SIZE;
+          
+          // If we got fewer records than PAGE_SIZE, we've reached the end
+          if (inventoryRows.length < PAGE_SIZE) {
+            hasMoreInventory = false;
+          }
         }
+        
+        console.log(`[Refresh] Inventory complete: ${inventoryProcessed} total records`);
         
         // ---- FETCH AND INGEST RETURNS ----
         console.log("[Refresh] Fetching returns data via Power Automate...");
