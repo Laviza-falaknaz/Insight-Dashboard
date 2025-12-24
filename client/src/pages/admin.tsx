@@ -19,11 +19,12 @@ interface RefreshStatus {
 
 interface RefreshLog {
   id: number;
-  uploadType: string;
-  recordCount: number;
+  tableName: string;
+  recordsCount: number;
+  insertedCount: number;
+  updatedCount: number;
   status: string;
   uploadedAt: string;
-  errorMessage: string | null;
 }
 
 export default function Admin() {
@@ -250,18 +251,28 @@ export default function Admin() {
                     data-testid={`log-entry-${log.id}`}
                   >
                     <div className="flex items-center gap-3">
-                      {getStatusIcon(log.status)}
+                      {getStatusIcon(log.status === "completed" ? "success" : log.status)}
                       <div>
-                        <p className="font-medium text-sm">{log.uploadType}</p>
+                        <p className="font-medium text-sm capitalize">{log.tableName}</p>
                         <p className="text-xs text-muted-foreground">
                           {new Date(log.uploadedAt).toLocaleString()}
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={log.status === "success" ? "default" : "destructive"}>
-                        {log.recordCount.toLocaleString()} records
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge variant={log.status === "completed" ? "default" : "destructive"}>
+                        {(log.recordsCount || 0).toLocaleString()} records
                       </Badge>
+                      {log.insertedCount > 0 && (
+                        <Badge variant="outline" className="text-green-600">
+                          +{log.insertedCount} new
+                        </Badge>
+                      )}
+                      {log.updatedCount > 0 && (
+                        <Badge variant="outline" className="text-blue-600">
+                          {log.updatedCount} updated
+                        </Badge>
+                      )}
                     </div>
                   </div>
                 ))}
