@@ -359,7 +359,7 @@ export async function registerRoutes(
   });
   
   // Upsert inventory data endpoint - handles duplicates efficiently for 3M+ records
-  // Uses batch multi-row inserts for high throughput
+  // Uses batch multi-row inserts with transaction wrapping for high throughput
   app.post("/api/data/inventory/upsert", async (req: Request, res: Response) => {
     try {
       const items = req.body;
@@ -373,7 +373,7 @@ export async function registerRoutes(
       }
 
       let totalProcessed = 0;
-      const batchSize = 500;
+      const batchSize = 1000; // Increased batch size for better throughput
       const columns = [
         'data_area_id', 'item_id', 'invent_serial_id', 'deal_ref', 'purch_price_usd',
         'purch_date', 'vend_comments', 'key_lang', 'os_sticker', 'display_size',
@@ -391,114 +391,138 @@ export async function registerRoutes(
         'order_responsible', 'product_specification', 'warranty_start_date', 'warranty_end_date', 'warranty_description'
       ];
       
-      for (let i = 0; i < items.length; i += batchSize) {
-        const batch = items.slice(i, i + batchSize).filter((item: Record<string, unknown>) => item.InventSerialId);
-        if (batch.length === 0) continue;
+      // Get a client from the pool for transaction
+      const client = await pool.connect();
+      
+      try {
+        // Start transaction for all batches
+        await client.query('BEGIN');
         
-        const values: unknown[] = [];
-        const valuePlaceholders: string[] = [];
-        let paramIndex = 1;
-        
-        for (const item of batch) {
-          const rowValues = [
-            item.dataAreaId || null,
-            item.ItemId || null,
-            item.InventSerialId,
-            item.DealRef || null,
-            sanitizeNumeric(item.PurchPriceUSD),
-            item.PurchDate || null,
-            item.VendComments || null,
-            item.KeyLang || null,
-            item.OsSticker || null,
-            item.DisplaySize || null,
-            sanitizeNumeric(item.LCDCostUSD),
-            item.StorageSerialNum || null,
-            item.VendName || null,
-            item.Category || null,
-            item.MadeIn || null,
-            item.GradeCondition || null,
-            sanitizeNumeric(item.PartsCostUSD),
-            item.FingerprintStr || null,
-            sanitizeNumeric(item.MiscCostUSD),
-            item.ProcessorGen || null,
-            item.ManufacturingDate || null,
-            item.PurchaseCategory || null,
-            item.KeyLayout || null,
-            item.PONumber || null,
-            item.Make || null,
-            item.Processor || null,
-            sanitizeNumeric(item.PackagingCostUSD),
-            item.ReceivedDate || null,
-            sanitizeNumeric(item.ITADTreesCostUSD),
-            item.StorageType || null,
-            item.SoldAsHDD || null,
-            sanitizeNumeric(item.StandardisationCostUSD),
-            item.Comments || null,
-            sanitizeNumeric(item.PurchPriceRevisedUSD),
-            item.Status || null,
-            sanitizeNumeric(item.ConsumableCostUSD),
-            item.Chassis || null,
-            item.JournalNum || null,
-            sanitizeNumeric(item.BatteryCostUSD),
-            item.Ram || null,
-            item.SoldAsRAM || null,
-            sanitizeNumeric(item.FreightChargesUSD),
-            item.HDD || null,
-            sanitizeNumeric(item.COACostUSD),
-            item.ManufacturerSerialNum || null,
-            item.SupplierPalletNum || null,
-            sanitizeNumeric(item.ResourceCostUSD),
-            sanitizeNumeric(item.CustomsDutyUSD),
-            item.Resolution || null,
-            item.ModelNum || null,
-            item.InvoiceAccount || null,
-            item.TotalCostCurUSD || null,
-            item.SalesOrderDate || null,
-            item.CustomerRef || null,
-            item.CRMRef || null,
-            item.InvoicingName || null,
-            item.TransType || null,
-            item.SalesInvoiceId || null,
-            item.SalesId || null,
-            item.InvoiceDate || null,
-            item.APINNumber || null,
-            item.Segregation || null,
-            sanitizeNumeric(item.FinalSalesPriceUSD),
-            sanitizeNumeric(item.FinalTotalCostUSD),
-            item.OrderTaker || null,
-            item.OrderResponsible || null,
-            item.ProductSpecification || null,
-            item.WarrantyStartDate || null,
-            item.WarrantyEndDate || null,
-            item.WarrantyDescription || null,
-          ];
+        for (let i = 0; i < items.length; i += batchSize) {
+          const batch = items.slice(i, i + batchSize).filter((item: Record<string, unknown>) => item.InventSerialId);
+          if (batch.length === 0) continue;
           
-          values.push(...rowValues);
-          const placeholders = rowValues.map(() => `$${paramIndex++}`);
-          valuePlaceholders.push(`(${placeholders.join(', ')})`);
+          const values: unknown[] = [];
+          const valuePlaceholders: string[] = [];
+          let paramIndex = 1;
+          
+          for (const item of batch) {
+            const rowValues = [
+              item.dataAreaId || null,
+              item.ItemId || null,
+              item.InventSerialId,
+              item.DealRef || null,
+              sanitizeNumeric(item.PurchPriceUSD),
+              item.PurchDate || null,
+              item.VendComments || null,
+              item.KeyLang || null,
+              item.OsSticker || null,
+              item.DisplaySize || null,
+              sanitizeNumeric(item.LCDCostUSD),
+              item.StorageSerialNum || null,
+              item.VendName || null,
+              item.Category || null,
+              item.MadeIn || null,
+              item.GradeCondition || null,
+              sanitizeNumeric(item.PartsCostUSD),
+              item.FingerprintStr || null,
+              sanitizeNumeric(item.MiscCostUSD),
+              item.ProcessorGen || null,
+              item.ManufacturingDate || null,
+              item.PurchaseCategory || null,
+              item.KeyLayout || null,
+              item.PONumber || null,
+              item.Make || null,
+              item.Processor || null,
+              sanitizeNumeric(item.PackagingCostUSD),
+              item.ReceivedDate || null,
+              sanitizeNumeric(item.ITADTreesCostUSD),
+              item.StorageType || null,
+              item.SoldAsHDD || null,
+              sanitizeNumeric(item.StandardisationCostUSD),
+              item.Comments || null,
+              sanitizeNumeric(item.PurchPriceRevisedUSD),
+              item.Status || null,
+              sanitizeNumeric(item.ConsumableCostUSD),
+              item.Chassis || null,
+              item.JournalNum || null,
+              sanitizeNumeric(item.BatteryCostUSD),
+              item.Ram || null,
+              item.SoldAsRAM || null,
+              sanitizeNumeric(item.FreightChargesUSD),
+              item.HDD || null,
+              sanitizeNumeric(item.COACostUSD),
+              item.ManufacturerSerialNum || null,
+              item.SupplierPalletNum || null,
+              sanitizeNumeric(item.ResourceCostUSD),
+              sanitizeNumeric(item.CustomsDutyUSD),
+              item.Resolution || null,
+              item.ModelNum || null,
+              item.InvoiceAccount || null,
+              item.TotalCostCurUSD || null,
+              item.SalesOrderDate || null,
+              item.CustomerRef || null,
+              item.CRMRef || null,
+              item.InvoicingName || null,
+              item.TransType || null,
+              item.SalesInvoiceId || null,
+              item.SalesId || null,
+              item.InvoiceDate || null,
+              item.APINNumber || null,
+              item.Segregation || null,
+              sanitizeNumeric(item.FinalSalesPriceUSD),
+              sanitizeNumeric(item.FinalTotalCostUSD),
+              item.OrderTaker || null,
+              item.OrderResponsible || null,
+              item.ProductSpecification || null,
+              item.WarrantyStartDate || null,
+              item.WarrantyEndDate || null,
+              item.WarrantyDescription || null,
+            ];
+            
+            values.push(...rowValues);
+            const placeholders = rowValues.map(() => `$${paramIndex++}`);
+            valuePlaceholders.push(`(${placeholders.join(', ')})`);
+          }
+          
+          // Use WHERE clause to skip unchanged rows - only update if data actually changed
+          const query = `
+            INSERT INTO inventory (${columns.join(', ')})
+            VALUES ${valuePlaceholders.join(', ')}
+            ON CONFLICT (invent_serial_id, data_area_id, item_id, sales_id, trans_type) DO UPDATE SET
+              deal_ref = EXCLUDED.deal_ref,
+              purch_price_usd = EXCLUDED.purch_price_usd,
+              purch_date = EXCLUDED.purch_date,
+              vend_comments = EXCLUDED.vend_comments,
+              vend_name = EXCLUDED.vend_name,
+              category = EXCLUDED.category,
+              grade_condition = EXCLUDED.grade_condition,
+              make = EXCLUDED.make,
+              status = EXCLUDED.status,
+              invoicing_name = EXCLUDED.invoicing_name,
+              invoice_date = EXCLUDED.invoice_date,
+              final_sales_price_usd = EXCLUDED.final_sales_price_usd,
+              final_total_cost_usd = EXCLUDED.final_total_cost_usd
+            WHERE inventory.status IS DISTINCT FROM EXCLUDED.status
+               OR inventory.final_sales_price_usd IS DISTINCT FROM EXCLUDED.final_sales_price_usd
+               OR inventory.final_total_cost_usd IS DISTINCT FROM EXCLUDED.final_total_cost_usd
+               OR inventory.invoicing_name IS DISTINCT FROM EXCLUDED.invoicing_name
+               OR inventory.invoice_date IS DISTINCT FROM EXCLUDED.invoice_date
+          `;
+          
+          await client.query(query, values);
+          totalProcessed += batch.length;
         }
         
-        const query = `
-          INSERT INTO inventory (${columns.join(', ')})
-          VALUES ${valuePlaceholders.join(', ')}
-          ON CONFLICT (invent_serial_id, data_area_id, item_id, sales_id, trans_type) DO UPDATE SET
-            deal_ref = EXCLUDED.deal_ref,
-            purch_price_usd = EXCLUDED.purch_price_usd,
-            purch_date = EXCLUDED.purch_date,
-            vend_comments = EXCLUDED.vend_comments,
-            vend_name = EXCLUDED.vend_name,
-            category = EXCLUDED.category,
-            grade_condition = EXCLUDED.grade_condition,
-            make = EXCLUDED.make,
-            status = EXCLUDED.status,
-            invoicing_name = EXCLUDED.invoicing_name,
-            invoice_date = EXCLUDED.invoice_date,
-            final_sales_price_usd = EXCLUDED.final_sales_price_usd,
-            final_total_cost_usd = EXCLUDED.final_total_cost_usd
-        `;
-        
-        await pool.query(query, values);
-        totalProcessed += batch.length;
+        // Commit the transaction
+        await client.query('COMMIT');
+      } catch (txError) {
+        // Rollback on error
+        await client.query('ROLLBACK');
+        throw txError;
+      } finally {
+        // Release the client back to the pool
+        client.release();
       }
       
       // Record the upload
@@ -522,7 +546,7 @@ export async function registerRoutes(
   });
 
   // Upsert returns data endpoint - handles duplicates efficiently
-  // Uses batch multi-row inserts for high throughput
+  // Uses batch multi-row inserts with transaction wrapping for high throughput
   app.post("/api/data/returns/upsert", async (req: Request, res: Response) => {
     try {
       const items = req.body;
@@ -536,7 +560,7 @@ export async function registerRoutes(
       }
 
       let totalProcessed = 0;
-      const batchSize = 500;
+      const batchSize = 1000; // Increased batch size for better throughput
       const columns = [
         'final_customer', 'related_order_name', 'case_id', 'rma_number', 'reason_for_return',
         'created_on', 'warehouse_notes', 'final_reseller_name', 'expected_shipping_date', 'rma_line_item_guid',
@@ -547,77 +571,99 @@ export async function registerRoutes(
         'rma_topic_label', 'uk_final_outcome', 'serial_id', 'area_id', 'item_id'
       ];
       
-      for (let i = 0; i < items.length; i += batchSize) {
-        const batch = items.slice(i, i + batchSize).filter((item: Record<string, unknown>) => item.RMALineItemGUID);
-        if (batch.length === 0) continue;
+      // Get a client from the pool for transaction
+      const client = await pool.connect();
+      
+      try {
+        // Start transaction for all batches
+        await client.query('BEGIN');
         
-        const values: unknown[] = [];
-        const valuePlaceholders: string[] = [];
-        let paramIndex = 1;
-        
-        for (const item of batch) {
-          const rowValues = [
-            item.FinalCustomer || null,
-            item.RelatedOrderName || null,
-            item.CaseID || null,
-            item.RMANumber || null,
-            item.ReasonforReturn || null,
-            item.CreatedOn || null,
-            item.WarehouseNotes || null,
-            item.FinalResellerName || null,
-            item.ExpectedShippingDate || null,
-            item.RMALineItemGUID,
-            item.RMALineName || null,
-            item.CaseEndUser || null,
-            item.UAEWarehosueNotes || null,
-            item.NotesDescription || null,
-            item.RMAGUID || null,
-            item.RelatedSerialGUID || null,
-            item.ModifiedOn || null,
-            item.OpportunityNumber || null,
-            item.ItemTestingDate || null,
-            item.FinalDistributorName || null,
-            item.CaseCustomer || null,
-            item.ItemReceivedDate || null,
-            item.CaseDescription || null,
-            item.DispatchDate || null,
-            item.ReplacementSerialGUID || null,
-            item.RMAStatus || null,
-            item.TypeOfUnit || null,
-            item.LineStatus || null,
-            item.LineSolution || null,
-            item.UAEFinalOutcome || null,
-            item.RMATopicLabel || null,
-            item.UKFinalOutcome || null,
-            item.SerialID || null,
-            item.AreaID || null,
-            item.ItemID || null,
-          ];
+        for (let i = 0; i < items.length; i += batchSize) {
+          const batch = items.slice(i, i + batchSize).filter((item: Record<string, unknown>) => item.RMALineItemGUID);
+          if (batch.length === 0) continue;
           
-          values.push(...rowValues);
-          const placeholders = rowValues.map(() => `$${paramIndex++}`);
-          valuePlaceholders.push(`(${placeholders.join(', ')})`);
+          const values: unknown[] = [];
+          const valuePlaceholders: string[] = [];
+          let paramIndex = 1;
+          
+          for (const item of batch) {
+            const rowValues = [
+              item.FinalCustomer || null,
+              item.RelatedOrderName || null,
+              item.CaseID || null,
+              item.RMANumber || null,
+              item.ReasonforReturn || null,
+              item.CreatedOn || null,
+              item.WarehouseNotes || null,
+              item.FinalResellerName || null,
+              item.ExpectedShippingDate || null,
+              item.RMALineItemGUID,
+              item.RMALineName || null,
+              item.CaseEndUser || null,
+              item.UAEWarehosueNotes || null,
+              item.NotesDescription || null,
+              item.RMAGUID || null,
+              item.RelatedSerialGUID || null,
+              item.ModifiedOn || null,
+              item.OpportunityNumber || null,
+              item.ItemTestingDate || null,
+              item.FinalDistributorName || null,
+              item.CaseCustomer || null,
+              item.ItemReceivedDate || null,
+              item.CaseDescription || null,
+              item.DispatchDate || null,
+              item.ReplacementSerialGUID || null,
+              item.RMAStatus || null,
+              item.TypeOfUnit || null,
+              item.LineStatus || null,
+              item.LineSolution || null,
+              item.UAEFinalOutcome || null,
+              item.RMATopicLabel || null,
+              item.UKFinalOutcome || null,
+              item.SerialID || null,
+              item.AreaID || null,
+              item.ItemID || null,
+            ];
+            
+            values.push(...rowValues);
+            const placeholders = rowValues.map(() => `$${paramIndex++}`);
+            valuePlaceholders.push(`(${placeholders.join(', ')})`);
+          }
+          
+          // Use WHERE clause to skip unchanged rows - only update if data actually changed
+          const query = `
+            INSERT INTO returns (${columns.join(', ')})
+            VALUES ${valuePlaceholders.join(', ')}
+            ON CONFLICT (rma_line_item_guid) DO UPDATE SET
+              final_customer = EXCLUDED.final_customer,
+              rma_number = EXCLUDED.rma_number,
+              reason_for_return = EXCLUDED.reason_for_return,
+              warehouse_notes = EXCLUDED.warehouse_notes,
+              modified_on = EXCLUDED.modified_on,
+              rma_status = EXCLUDED.rma_status,
+              line_status = EXCLUDED.line_status,
+              line_solution = EXCLUDED.line_solution,
+              uae_final_outcome = EXCLUDED.uae_final_outcome,
+              uk_final_outcome = EXCLUDED.uk_final_outcome,
+              updated_at = NOW()
+            WHERE returns.rma_status IS DISTINCT FROM EXCLUDED.rma_status
+               OR returns.line_status IS DISTINCT FROM EXCLUDED.line_status
+               OR returns.line_solution IS DISTINCT FROM EXCLUDED.line_solution
+          `;
+          
+          await client.query(query, values);
+          totalProcessed += batch.length;
         }
         
-        const query = `
-          INSERT INTO returns (${columns.join(', ')})
-          VALUES ${valuePlaceholders.join(', ')}
-          ON CONFLICT (rma_line_item_guid) DO UPDATE SET
-            final_customer = EXCLUDED.final_customer,
-            rma_number = EXCLUDED.rma_number,
-            reason_for_return = EXCLUDED.reason_for_return,
-            warehouse_notes = EXCLUDED.warehouse_notes,
-            modified_on = EXCLUDED.modified_on,
-            rma_status = EXCLUDED.rma_status,
-            line_status = EXCLUDED.line_status,
-            line_solution = EXCLUDED.line_solution,
-            uae_final_outcome = EXCLUDED.uae_final_outcome,
-            uk_final_outcome = EXCLUDED.uk_final_outcome,
-            updated_at = NOW()
-        `;
-        
-        await pool.query(query, values);
-        totalProcessed += batch.length;
+        // Commit the transaction
+        await client.query('COMMIT');
+      } catch (txError) {
+        // Rollback on error
+        await client.query('ROLLBACK');
+        throw txError;
+      } finally {
+        // Release the client back to the pool
+        client.release();
       }
       
       // Record the upload
