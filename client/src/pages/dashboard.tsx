@@ -26,6 +26,8 @@ import { TopPerformers } from "@/components/charts/top-performers";
 import { ConnectionError } from "@/components/connection-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
+import { DashboardToolbar } from "@/components/DashboardToolbar";
+import { AIInsightsPanel } from "@/components/AIInsightsPanel";
 import type { DashboardData, FilterDropdownOptions, FilterOptions, ExecutiveSummary, FreightAnalysis, InventoryAgingAnalysis, ReturnsAnalysis, MarginAnalysis } from "@shared/schema";
 
 interface DateRange {
@@ -152,6 +154,11 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <DashboardToolbar 
+            pageName="Executive Dashboard" 
+            chartElementIds={["dashboard-kpis", "dashboard-charts", "dashboard-alerts"]}
+            insightType="category"
+          />
           <DateRangePicker dateRange={dateRange} onDateRangeChange={setDateRange} />
           <div className="flex items-center gap-2">
             <Button
@@ -194,7 +201,7 @@ export default function Dashboard() {
         Last updated: {lastUpdated.toLocaleTimeString()}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div id="dashboard-kpis" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KPICard
           title="Total Revenue"
           value={formatCurrency(dashboardData?.kpis.totalRevenue || 0)}
@@ -236,7 +243,7 @@ export default function Dashboard() {
       </div>
 
       {allAlerts.length > 0 && (
-        <Card>
+        <Card id="dashboard-alerts">
           <CardHeader className="pb-3">
             <CardTitle className="text-base font-medium flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-amber-500" />
@@ -425,7 +432,7 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+      <div id="dashboard-charts" className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <RevenueChart
           data={dashboardData?.revenueOverTime || []}
           isLoading={dashboardLoading}
@@ -478,6 +485,14 @@ export default function Dashboard() {
           isLoading={dashboardLoading}
         />
       </div>
+
+      {executiveSummary && (
+        <AIInsightsPanel
+          context="executive_summary"
+          data={executiveSummary}
+          title="AI Executive Insights"
+        />
+      )}
     </div>
   );
 }

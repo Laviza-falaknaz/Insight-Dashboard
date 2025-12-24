@@ -24,6 +24,7 @@ import Inventory from "@/pages/inventory";
 import Profitability from "@/pages/profitability";
 import Reports from "@/pages/reports";
 import DataTablePage from "@/pages/data-table-page";
+import MyCollection from "@/pages/my-collection";
 import Login from "@/pages/login";
 import Admin from "@/pages/admin";
 import NotFound from "@/pages/not-found";
@@ -100,6 +101,7 @@ function AppRoutes() {
         <Route path="/profitability" component={Profitability} />
         <Route path="/reports" component={Reports} />
         <Route path="/data-table" component={DataTablePage} />
+        <Route path="/my-collection" component={MyCollection} />
         <Route component={NotFound} />
       </Switch>
     </MainLayout>

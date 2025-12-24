@@ -8,6 +8,7 @@ import {
   Table2,
   TrendingUp,
   Boxes,
+  FolderHeart,
 } from "lucide-react";
 import {
   Sidebar,
@@ -65,6 +66,11 @@ const analyticsItems = [
     title: "Data Table",
     icon: Table2,
     url: "/data-table",
+  },
+  {
+    title: "My Collection",
+    icon: FolderHeart,
+    url: "/my-collection",
   },
 ];
 
