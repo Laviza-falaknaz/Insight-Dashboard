@@ -8,8 +8,14 @@ import {
   ShoppingCart,
   Users,
   RefreshCw,
+  AlertTriangle,
+  Truck,
+  Clock,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { KPICard } from "@/components/kpi-card";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { FilterPanel } from "@/components/filter-panel";
@@ -18,7 +24,9 @@ import { CategoryChart } from "@/components/charts/category-chart";
 import { StatusChart } from "@/components/charts/status-chart";
 import { TopPerformers } from "@/components/charts/top-performers";
 import { ConnectionError } from "@/components/connection-error";
-import type { DashboardData, FilterDropdownOptions, FilterOptions } from "@shared/schema";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
+import type { DashboardData, FilterDropdownOptions, FilterOptions, ExecutiveSummary, FreightAnalysis, InventoryAgingAnalysis, ReturnsAnalysis, MarginAnalysis } from "@shared/schema";
 
 interface DateRange {
   from: Date | undefined;
@@ -34,6 +42,8 @@ const formatCurrency = (value: number) => {
   }
   return `$${value.toFixed(0)}`;
 };
+
+const formatPercent = (value: number) => `${value.toFixed(1)}%`;
 
 export default function Dashboard() {
   const [dateRange, setDateRange] = useState<DateRange>({
@@ -57,8 +67,33 @@ export default function Dashboard() {
     return params.toString();
   };
 
-  const { data: dashboardData, isLoading: dashboardLoading, refetch, isError, error } = useQuery<DashboardData>({
+  const { data: dashboardData, isLoading: dashboardLoading, refetch, isError } = useQuery<DashboardData>({
     queryKey: ["/api/dashboard", buildQueryParams()],
+    retry: 1,
+  });
+
+  const { data: executiveSummary, isLoading: executiveLoading } = useQuery<ExecutiveSummary>({
+    queryKey: ["/api/insights/executive-summary"],
+    retry: 1,
+  });
+
+  const { data: freightData, isLoading: freightLoading } = useQuery<FreightAnalysis>({
+    queryKey: ["/api/insights/freight"],
+    retry: 1,
+  });
+
+  const { data: agingData, isLoading: agingLoading } = useQuery<InventoryAgingAnalysis>({
+    queryKey: ["/api/insights/inventory-aging"],
+    retry: 1,
+  });
+
+  const { data: returnsData, isLoading: returnsLoading } = useQuery<ReturnsAnalysis>({
+    queryKey: ["/api/insights/returns"],
+    retry: 1,
+  });
+
+  const { data: marginData, isLoading: marginLoading } = useQuery<MarginAnalysis>({
+    queryKey: ["/api/insights/margins"],
     retry: 1,
   });
 
@@ -91,13 +126,29 @@ export default function Dashboard() {
     grades: [],
   };
 
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'high': return 'destructive';
+      case 'medium': return 'secondary';
+      default: return 'outline';
+    }
+  };
+
+  const allAlerts = [
+    ...(executiveSummary?.criticalAlerts || []),
+    ...(freightData?.alerts || []),
+    ...(agingData?.alerts || []),
+    ...(returnsData?.alerts || []),
+    ...(marginData?.alerts || []),
+  ].slice(0, 6);
+
   return (
     <div className="p-4 space-y-4 max-w-full">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard Overview</h1>
+          <h1 className="text-2xl font-bold" data-testid="text-dashboard-title">Executive Dashboard</h1>
           <p className="text-sm text-muted-foreground">
-            Real-time profit insights and analytics
+            Real-time profit insights and executive analytics
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -151,12 +202,6 @@ export default function Dashboard() {
           isLoading={dashboardLoading}
         />
         <KPICard
-          title="Total Cost"
-          value={formatCurrency(dashboardData?.kpis.totalCost || 0)}
-          icon={<Package className="h-4 w-4" />}
-          isLoading={dashboardLoading}
-        />
-        <KPICard
           title="Total Profit"
           value={formatCurrency(dashboardData?.kpis.totalProfit || 0)}
           trend={dashboardData?.kpis.profitMargin}
@@ -166,13 +211,19 @@ export default function Dashboard() {
         />
         <KPICard
           title="Profit Margin"
-          value={`${(dashboardData?.kpis.profitMargin || 0).toFixed(1)}%`}
+          value={formatPercent(dashboardData?.kpis.profitMargin || 0)}
           icon={<TrendingUp className="h-4 w-4" />}
           isLoading={dashboardLoading}
         />
         <KPICard
           title="Units Sold"
           value={(dashboardData?.kpis.unitsSold || 0).toLocaleString()}
+          icon={<Package className="h-4 w-4" />}
+          isLoading={dashboardLoading}
+        />
+        <KPICard
+          title="Total Orders"
+          value={(dashboardData?.kpis.totalOrders || 0).toLocaleString()}
           icon={<ShoppingCart className="h-4 w-4" />}
           isLoading={dashboardLoading}
         />
@@ -182,6 +233,196 @@ export default function Dashboard() {
           icon={<Users className="h-4 w-4" />}
           isLoading={dashboardLoading}
         />
+      </div>
+
+      {allAlerts.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              Critical Alerts & Insights
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {allAlerts.map((alert, idx) => (
+                <div key={idx} className="p-3 rounded-md border bg-muted/30">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <span className="text-sm font-medium">{alert.title}</span>
+                    <Badge variant={getSeverityColor(alert.severity)} className="shrink-0">
+                      {alert.severity}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">{alert.description}</p>
+                  <p className="text-xs text-primary">{alert.recommendation}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <Truck className="h-4 w-4 text-blue-500" />
+              Freight Overview
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {freightLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Total Freight</span>
+                  <span className="text-sm font-medium">{formatCurrency(freightData?.totalFreightCost || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">% of Total Cost</span>
+                  <span className="text-sm font-medium">{formatPercent(freightData?.freightAsPercentOfCost || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Avg Per Unit</span>
+                  <span className="text-sm font-medium">{formatCurrency(freightData?.averageFreightPerUnit || 0)}</span>
+                </div>
+                <div className="pt-2 border-t">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-xs text-muted-foreground">Concentration Risk</span>
+                    <span className={`text-xs font-medium ${(freightData?.freightConcentrationRisk || 0) > 65 ? 'text-amber-500' : ''}`}>
+                      {formatPercent(freightData?.freightConcentrationRisk || 0)}
+                    </span>
+                  </div>
+                  <Progress value={freightData?.freightConcentrationRisk || 0} className="h-1.5" />
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <Clock className="h-4 w-4 text-orange-500" />
+              Inventory Aging
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {agingLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Total Value</span>
+                  <span className="text-sm font-medium">{formatCurrency(agingData?.totalInventoryValue || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Avg Days Held</span>
+                  <span className="text-sm font-medium">{agingData?.averageDaysHeld || 0} days</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Dead Stock</span>
+                  <span className={`text-sm font-medium ${(agingData?.deadStockValue || 0) > 0 ? 'text-red-500' : ''}`}>
+                    {formatCurrency(agingData?.deadStockValue || 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Slow Moving</span>
+                  <span className={`text-sm font-medium ${(agingData?.slowMovingValue || 0) > 0 ? 'text-amber-500' : ''}`}>
+                    {formatCurrency(agingData?.slowMovingValue || 0)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <RotateCcw className="h-4 w-4 text-purple-500" />
+              Returns & RMA
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {returnsLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Total Returns</span>
+                  <span className="text-sm font-medium">{returnsData?.totalReturns?.toLocaleString() || 0}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Return Rate</span>
+                  <span className={`text-sm font-medium ${(returnsData?.returnRate || 0) > 5 ? 'text-red-500' : ''}`}>
+                    {formatPercent(returnsData?.returnRate || 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Last 30 Days</span>
+                  <span className="text-sm font-medium">{returnsData?.returnsLast30Days || 0}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Repeat Failures</span>
+                  <span className={`text-sm font-medium ${(returnsData?.repeatFailures || 0) > 0 ? 'text-amber-500' : ''}`}>
+                    {returnsData?.repeatFailures || 0}
+                  </span>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-emerald-500" />
+              Margin Analysis
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {marginLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Overall Margin</span>
+                  <span className="text-sm font-medium">{formatPercent(marginData?.overallMargin || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Negative Margin Items</span>
+                  <span className={`text-sm font-medium ${(marginData?.negativeMarginItems || 0) > 0 ? 'text-red-500' : ''}`}>
+                    {(marginData?.negativeMarginItems || 0).toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Loss Value</span>
+                  <span className={`text-sm font-medium ${(marginData?.negativeMarginValue || 0) > 0 ? 'text-red-500' : ''}`}>
+                    {formatCurrency(marginData?.negativeMarginValue || 0)}
+                  </span>
+                </div>
+                <div className="pt-2 border-t">
+                  <span className="text-xs text-muted-foreground">Best: </span>
+                  <span className="text-xs font-medium">{executiveSummary?.quickInsights?.bestPerformingCategory || 'N/A'}</span>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">

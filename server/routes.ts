@@ -1021,6 +1021,904 @@ export async function registerRoutes(
   });
 
   // ============================================
+  // EXECUTIVE INSIGHTS API ENDPOINTS
+  // ============================================
+
+  // Freight Analysis - comprehensive freight cost insights
+  app.get("/api/insights/freight", async (_req: Request, res: Response) => {
+    try {
+      // Total freight metrics
+      const freightTotals = await db.select({
+        totalFreight: sql<number>`COALESCE(SUM(CAST(${inventory.freightChargesUSD} as numeric)), 0)`,
+        totalCost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+        itemCount: count(),
+      }).from(inventory);
+
+      const totalFreight = Number(freightTotals[0]?.totalFreight) || 0;
+      const totalCost = Number(freightTotals[0]?.totalCost) || 0;
+      const itemCount = Number(freightTotals[0]?.itemCount) || 0;
+
+      // Freight by supplier
+      const freightBySupplier = await db.select({
+        supplier: inventory.vendName,
+        cost: sql<number>`COALESCE(SUM(CAST(${inventory.freightChargesUSD} as numeric)), 0)`,
+        itemCount: count(),
+      }).from(inventory)
+        .where(and(isNotNull(inventory.vendName), ne(inventory.vendName, "")))
+        .groupBy(inventory.vendName)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.freightChargesUSD} as numeric)), 0)`))
+        .limit(20);
+
+      // Freight by category
+      const freightByCategory = await db.select({
+        category: inventory.category,
+        cost: sql<number>`COALESCE(SUM(CAST(${inventory.freightChargesUSD} as numeric)), 0)`,
+        itemCount: count(),
+      }).from(inventory)
+        .where(and(isNotNull(inventory.category), ne(inventory.category, "")))
+        .groupBy(inventory.category)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.freightChargesUSD} as numeric)), 0)`))
+        .limit(15);
+
+      // Calculate concentration risk (top 3 suppliers % of total freight)
+      const top3Freight = freightBySupplier.slice(0, 3).reduce((sum, s) => sum + Number(s.cost), 0);
+      const concentrationRisk = totalFreight > 0 ? (top3Freight / totalFreight) * 100 : 0;
+
+      // Generate alerts
+      const alerts: any[] = [];
+      
+      if (concentrationRisk > 65) {
+        alerts.push({
+          type: 'concentration',
+          severity: concentrationRisk > 80 ? 'high' : 'medium',
+          title: 'High Freight Concentration Risk',
+          description: `Top 3 suppliers account for ${concentrationRisk.toFixed(1)}% of total freight costs`,
+          value: concentrationRisk,
+          recommendation: 'Diversify supplier base to reduce dependency and negotiate better rates',
+        });
+      }
+
+      // Check for high freight as % of cost per supplier
+      freightBySupplier.forEach(s => {
+        const avgPerUnit = Number(s.itemCount) > 0 ? Number(s.cost) / Number(s.itemCount) : 0;
+        const overallAvg = itemCount > 0 ? totalFreight / itemCount : 0;
+        if (avgPerUnit > overallAvg * 1.5 && Number(s.cost) > 1000) {
+          alerts.push({
+            type: 'spike',
+            severity: avgPerUnit > overallAvg * 2 ? 'high' : 'medium',
+            title: `High Freight Costs from ${s.supplier}`,
+            description: `Average freight per unit ($${avgPerUnit.toFixed(2)}) is ${((avgPerUnit / overallAvg - 1) * 100).toFixed(0)}% above average`,
+            supplier: s.supplier,
+            value: avgPerUnit,
+            baseline: overallAvg,
+            percentChange: ((avgPerUnit / overallAvg - 1) * 100),
+            affectedItems: Number(s.itemCount),
+            recommendation: 'Renegotiate shipping terms or consider alternative logistics providers',
+          });
+        }
+      });
+
+      res.json({
+        totalFreightCost: totalFreight,
+        freightAsPercentOfCost: totalCost > 0 ? (totalFreight / totalCost) * 100 : 0,
+        averageFreightPerUnit: itemCount > 0 ? totalFreight / itemCount : 0,
+        freightBySupplier: freightBySupplier.map(s => ({
+          supplier: s.supplier || 'Unknown',
+          cost: Number(s.cost),
+          itemCount: Number(s.itemCount),
+          avgPerUnit: Number(s.itemCount) > 0 ? Number(s.cost) / Number(s.itemCount) : 0,
+        })),
+        freightByCategory: freightByCategory.map(c => ({
+          category: c.category || 'Unknown',
+          cost: Number(c.cost),
+          itemCount: Number(c.itemCount),
+          avgPerUnit: Number(c.itemCount) > 0 ? Number(c.cost) / Number(c.itemCount) : 0,
+        })),
+        freightConcentrationRisk: concentrationRisk,
+        alerts: alerts.slice(0, 5),
+      });
+    } catch (error) {
+      console.error("Error fetching freight analysis:", error);
+      res.status(500).json({ error: "Failed to fetch freight analysis" });
+    }
+  });
+
+  // Inventory Aging Analysis
+  app.get("/api/insights/inventory-aging", async (_req: Request, res: Response) => {
+    try {
+      // Get aging metrics with date calculations
+      const agingData = await db.select({
+        category: inventory.category,
+        purchDate: inventory.purchDate,
+        invoiceDate: inventory.invoiceDate,
+        status: inventory.status,
+        cost: inventory.finalTotalCostUSD,
+        itemId: inventory.itemId,
+      }).from(inventory)
+        .limit(10000);
+
+      const now = new Date();
+      let totalValue = 0;
+      let totalDays = 0;
+      let deadStockCount = 0;
+      let deadStockValue = 0;
+      let slowMovingCount = 0;
+      let slowMovingValue = 0;
+      
+      const agingBuckets = {
+        '0-30 days': { count: 0, value: 0 },
+        '31-60 days': { count: 0, value: 0 },
+        '61-90 days': { count: 0, value: 0 },
+        '91-180 days': { count: 0, value: 0 },
+        '180+ days': { count: 0, value: 0 },
+      };
+
+      const categoryAging: Record<string, { value: number; days: number; count: number }> = {};
+
+      agingData.forEach(item => {
+        const cost = Number(item.cost) || 0;
+        totalValue += cost;
+        
+        const purchDate = item.purchDate ? new Date(item.purchDate) : null;
+        const invoiceDate = item.invoiceDate ? new Date(item.invoiceDate) : null;
+        
+        if (purchDate && !isNaN(purchDate.getTime())) {
+          const daysHeld = invoiceDate && !isNaN(invoiceDate.getTime()) 
+            ? Math.floor((invoiceDate.getTime() - purchDate.getTime()) / (1000 * 60 * 60 * 24))
+            : Math.floor((now.getTime() - purchDate.getTime()) / (1000 * 60 * 60 * 24));
+          
+          totalDays += Math.max(0, daysHeld);
+          
+          // Bucket by age
+          if (daysHeld <= 30) {
+            agingBuckets['0-30 days'].count++;
+            agingBuckets['0-30 days'].value += cost;
+          } else if (daysHeld <= 60) {
+            agingBuckets['31-60 days'].count++;
+            agingBuckets['31-60 days'].value += cost;
+          } else if (daysHeld <= 90) {
+            agingBuckets['61-90 days'].count++;
+            agingBuckets['61-90 days'].value += cost;
+          } else if (daysHeld <= 180) {
+            agingBuckets['91-180 days'].count++;
+            agingBuckets['91-180 days'].value += cost;
+          } else {
+            agingBuckets['180+ days'].count++;
+            agingBuckets['180+ days'].value += cost;
+          }
+
+          // Dead stock: unsold for 180+ days
+          if (!invoiceDate && daysHeld > 180) {
+            deadStockCount++;
+            deadStockValue += cost;
+          }
+          
+          // Slow moving: unsold for 90-180 days
+          if (!invoiceDate && daysHeld > 90 && daysHeld <= 180) {
+            slowMovingCount++;
+            slowMovingValue += cost;
+          }
+
+          // Category aging
+          const cat = item.category || 'Unknown';
+          if (!categoryAging[cat]) {
+            categoryAging[cat] = { value: 0, days: 0, count: 0 };
+          }
+          categoryAging[cat].value += cost;
+          categoryAging[cat].days += Math.max(0, daysHeld);
+          categoryAging[cat].count++;
+        }
+      });
+
+      const avgDaysHeld = agingData.length > 0 ? totalDays / agingData.length : 0;
+
+      // Generate alerts
+      const alerts: any[] = [];
+      
+      if (deadStockValue > totalValue * 0.1) {
+        alerts.push({
+          type: 'dead_stock',
+          severity: 'high',
+          title: 'High Dead Stock Value',
+          description: `$${deadStockValue.toLocaleString()} in inventory unsold for 180+ days`,
+          value: deadStockValue,
+          recommendation: 'Consider liquidation, bundle deals, or write-off for tax purposes',
+        });
+      }
+
+      if (slowMovingValue > totalValue * 0.15) {
+        alerts.push({
+          type: 'slow_moving',
+          severity: 'medium',
+          title: 'Slow-Moving Inventory Alert',
+          description: `$${slowMovingValue.toLocaleString()} in inventory unsold for 90-180 days`,
+          value: slowMovingValue,
+          recommendation: 'Apply promotional pricing or accelerate sales efforts',
+        });
+      }
+
+      res.json({
+        totalInventoryValue: totalValue,
+        averageDaysHeld: Math.round(avgDaysHeld),
+        agingBuckets: Object.entries(agingBuckets).map(([range, data]) => ({
+          range,
+          count: data.count,
+          value: data.value,
+          percentOfTotal: totalValue > 0 ? (data.value / totalValue) * 100 : 0,
+        })),
+        deadStockValue,
+        deadStockCount,
+        slowMovingValue,
+        slowMovingCount,
+        capitalLockupByCategory: Object.entries(categoryAging)
+          .map(([category, data]) => ({
+            category,
+            value: data.value,
+            avgDays: data.count > 0 ? Math.round(data.days / data.count) : 0,
+          }))
+          .sort((a, b) => b.value - a.value)
+          .slice(0, 10),
+        alerts,
+      });
+    } catch (error) {
+      console.error("Error fetching inventory aging:", error);
+      res.status(500).json({ error: "Failed to fetch inventory aging" });
+    }
+  });
+
+  // Returns/RMA Analysis
+  app.get("/api/insights/returns", async (_req: Request, res: Response) => {
+    try {
+      // Get returns data
+      const returnsData = await db.select().from(returns).limit(5000);
+      const totalSold = await db.select({ count: count() }).from(inventory)
+        .where(isNotNull(inventory.salesId));
+      
+      const totalReturns = returnsData.length;
+      const totalSoldCount = Number(totalSold[0]?.count) || 0;
+      const returnRate = totalSoldCount > 0 ? (totalReturns / totalSoldCount) * 100 : 0;
+
+      // Returns by reason
+      const reasonCounts: Record<string, number> = {};
+      const statusCounts: Record<string, number> = {};
+      const customerReturns: Record<string, number> = {};
+      let earlyFailures = 0;
+      const serialCounts: Record<string, number> = {};
+      let returnsLast30Days = 0;
+
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      returnsData.forEach(r => {
+        // Count by reason
+        const reason = r.reasonForReturn || 'Unknown';
+        reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+
+        // Count by status
+        const status = r.rmaStatus || 'Unknown';
+        statusCounts[status] = (statusCounts[status] || 0) + 1;
+
+        // Count by customer
+        const customer = r.finalCustomer || r.caseCustomer || 'Unknown';
+        customerReturns[customer] = (customerReturns[customer] || 0) + 1;
+
+        // Check for early failures (within 30 days)
+        if (r.createdOn) {
+          const createdDate = new Date(r.createdOn);
+          if (!isNaN(createdDate.getTime()) && createdDate >= thirtyDaysAgo) {
+            returnsLast30Days++;
+          }
+        }
+
+        // Track repeat failures by serial
+        if (r.serialId) {
+          serialCounts[r.serialId] = (serialCounts[r.serialId] || 0) + 1;
+        }
+      });
+
+      const repeatFailures = Object.values(serialCounts).filter(c => c > 1).length;
+
+      // Generate alerts
+      const alerts: any[] = [];
+
+      if (returnRate > 5) {
+        alerts.push({
+          type: 'early_failure',
+          severity: returnRate > 10 ? 'high' : 'medium',
+          title: 'Elevated Return Rate',
+          description: `Return rate of ${returnRate.toFixed(1)}% exceeds target threshold`,
+          value: returnRate,
+          recommendation: 'Investigate root causes and implement quality improvements',
+        });
+      }
+
+      if (repeatFailures > 10) {
+        alerts.push({
+          type: 'repeat_failure',
+          severity: 'high',
+          title: 'Multiple Repeat Failures Detected',
+          description: `${repeatFailures} items have been returned multiple times`,
+          affectedItems: repeatFailures,
+          recommendation: 'Review quality control processes for repeat failure items',
+        });
+      }
+
+      res.json({
+        totalReturns,
+        returnRate,
+        returnsLast30Days,
+        returnsByReason: Object.entries(reasonCounts)
+          .map(([reason, count]) => ({
+            reason,
+            count,
+            percent: totalReturns > 0 ? (count / totalReturns) * 100 : 0,
+          }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 10),
+        returnsByStatus: Object.entries(statusCounts)
+          .map(([status, count]) => ({ status, count }))
+          .sort((a, b) => b.count - a.count),
+        topReturnCustomers: Object.entries(customerReturns)
+          .map(([customer, count]) => ({
+            customer,
+            count,
+            rate: 0, // Would need customer order data to calculate
+          }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 10),
+        earlyFailureCount: returnsLast30Days,
+        repeatFailures,
+        alerts,
+      });
+    } catch (error) {
+      console.error("Error fetching returns analysis:", error);
+      res.status(500).json({ error: "Failed to fetch returns analysis" });
+    }
+  });
+
+  // Margin Analysis - comprehensive profitability insights
+  app.get("/api/insights/margins", async (_req: Request, res: Response) => {
+    try {
+      // Overall margin
+      const overallData = await db.select({
+        totalRevenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        totalCost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+        itemCount: count(),
+      }).from(inventory);
+
+      const totalRevenue = Number(overallData[0]?.totalRevenue) || 0;
+      const totalCost = Number(overallData[0]?.totalCost) || 0;
+      const overallProfit = totalRevenue - totalCost;
+      const overallMargin = totalRevenue > 0 ? (overallProfit / totalRevenue) * 100 : 0;
+
+      // Margin by category
+      const marginByCategory = await db.select({
+        category: inventory.category,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+      }).from(inventory)
+        .where(and(isNotNull(inventory.category), ne(inventory.category, "")))
+        .groupBy(inventory.category)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`));
+
+      // Margin by make
+      const marginByMake = await db.select({
+        make: inventory.make,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+      }).from(inventory)
+        .where(and(isNotNull(inventory.make), ne(inventory.make, "")))
+        .groupBy(inventory.make)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
+        .limit(15);
+
+      // Negative margin items
+      const negativeMarginData = await db.select({
+        count: sql<number>`COUNT(*)`,
+        value: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric) - CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+      }).from(inventory)
+        .where(sql`CAST(${inventory.finalSalesPriceUSD} as numeric) < CAST(${inventory.finalTotalCostUSD} as numeric)`);
+
+      const negativeMarginItems = Number(negativeMarginData[0]?.count) || 0;
+      const negativeMarginValue = Math.abs(Number(negativeMarginData[0]?.value) || 0);
+
+      // Margin trend by month
+      const marginTrend = await db.select({
+        month: sql<string>`TO_CHAR(TO_DATE(${inventory.invoiceDate}, 'YYYY-MM-DD'), 'YYYY-MM')`,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+      }).from(inventory)
+        .where(and(isNotNull(inventory.invoiceDate), ne(inventory.invoiceDate, "")))
+        .groupBy(sql`TO_CHAR(TO_DATE(${inventory.invoiceDate}, 'YYYY-MM-DD'), 'YYYY-MM')`)
+        .orderBy(sql`TO_CHAR(TO_DATE(${inventory.invoiceDate}, 'YYYY-MM-DD'), 'YYYY-MM')`)
+        .limit(12);
+
+      // Generate alerts
+      const alerts: any[] = [];
+
+      if (negativeMarginItems > 100) {
+        alerts.push({
+          type: 'negative_margin',
+          severity: 'high',
+          title: 'Significant Negative Margin Items',
+          description: `${negativeMarginItems} items sold at a loss totaling $${negativeMarginValue.toLocaleString()}`,
+          currentMargin: -100,
+          impactValue: negativeMarginValue,
+          recommendation: 'Review pricing strategy and cost controls for loss-making products',
+        });
+      }
+
+      // Check for low margin categories
+      marginByCategory.forEach(cat => {
+        const revenue = Number(cat.revenue);
+        const cost = Number(cat.cost);
+        const profit = revenue - cost;
+        const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+        
+        if (margin < 5 && revenue > 10000) {
+          alerts.push({
+            type: 'margin_erosion',
+            severity: margin < 0 ? 'high' : 'medium',
+            title: `Low Margin Category: ${cat.category}`,
+            description: `${cat.category} has only ${margin.toFixed(1)}% margin on $${revenue.toLocaleString()} revenue`,
+            category: cat.category,
+            currentMargin: margin,
+            impactValue: profit,
+            recommendation: 'Analyze cost structure and consider price adjustments',
+          });
+        }
+      });
+
+      res.json({
+        overallMargin,
+        marginByCategory: marginByCategory.map(c => {
+          const revenue = Number(c.revenue);
+          const cost = Number(c.cost);
+          const profit = revenue - cost;
+          return {
+            category: c.category || 'Unknown',
+            margin: revenue > 0 ? (profit / revenue) * 100 : 0,
+            revenue,
+            profit,
+          };
+        }).slice(0, 15),
+        marginByMake: marginByMake.map(m => {
+          const revenue = Number(m.revenue);
+          const cost = Number(m.cost);
+          const profit = revenue - cost;
+          return {
+            make: m.make || 'Unknown',
+            margin: revenue > 0 ? (profit / revenue) * 100 : 0,
+            revenue,
+            profit,
+          };
+        }),
+        negativeMarginItems,
+        negativeMarginValue,
+        marginTrend: marginTrend.map(t => {
+          const revenue = Number(t.revenue);
+          const cost = Number(t.cost);
+          return {
+            period: t.month || 'Unknown',
+            margin: revenue > 0 ? ((revenue - cost) / revenue) * 100 : 0,
+          };
+        }),
+        alerts: alerts.slice(0, 5),
+      });
+    } catch (error) {
+      console.error("Error fetching margin analysis:", error);
+      res.status(500).json({ error: "Failed to fetch margin analysis" });
+    }
+  });
+
+  // Orders Analysis - comprehensive order insights
+  app.get("/api/insights/orders", async (_req: Request, res: Response) => {
+    try {
+      // Overall order metrics
+      const orderMetrics = await db.select({
+        totalOrders: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
+        totalRevenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        totalCost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+        itemCount: count(),
+      }).from(inventory)
+        .where(and(isNotNull(inventory.salesId), ne(inventory.salesId, "")));
+
+      const totalOrders = Number(orderMetrics[0]?.totalOrders) || 0;
+      const totalRevenue = Number(orderMetrics[0]?.totalRevenue) || 0;
+      const totalCost = Number(orderMetrics[0]?.totalCost) || 0;
+      const totalItems = Number(orderMetrics[0]?.itemCount) || 0;
+
+      // Orders by month
+      const ordersByMonth = await db.select({
+        month: sql<string>`TO_CHAR(TO_DATE(${inventory.invoiceDate}, 'YYYY-MM-DD'), 'YYYY-MM')`,
+        orders: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+      }).from(inventory)
+        .where(and(isNotNull(inventory.invoiceDate), ne(inventory.invoiceDate, "")))
+        .groupBy(sql`TO_CHAR(TO_DATE(${inventory.invoiceDate}, 'YYYY-MM-DD'), 'YYYY-MM')`)
+        .orderBy(sql`TO_CHAR(TO_DATE(${inventory.invoiceDate}, 'YYYY-MM-DD'), 'YYYY-MM')`)
+        .limit(12);
+
+      // Orders by customer
+      const ordersByCustomer = await db.select({
+        customer: inventory.invoicingName,
+        orders: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+      }).from(inventory)
+        .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
+        .groupBy(inventory.invoicingName)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
+        .limit(15);
+
+      // Orders by status
+      const ordersByStatus = await db.select({
+        status: inventory.status,
+        count: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+      }).from(inventory)
+        .groupBy(inventory.status)
+        .orderBy(desc(sql`COUNT(DISTINCT ${inventory.salesId})`));
+
+      // Top orders by value
+      const topOrders = await db.select({
+        salesId: inventory.salesId,
+        customer: inventory.invoicingName,
+        value: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        items: count(),
+        date: sql<string>`MAX(${inventory.invoiceDate})`,
+      }).from(inventory)
+        .where(and(isNotNull(inventory.salesId), ne(inventory.salesId, "")))
+        .groupBy(inventory.salesId, inventory.invoicingName)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
+        .limit(10);
+
+      res.json({
+        totalOrders,
+        totalRevenue,
+        totalProfit: totalRevenue - totalCost,
+        averageOrderValue: totalOrders > 0 ? totalRevenue / totalOrders : 0,
+        itemsPerOrder: totalOrders > 0 ? totalItems / totalOrders : 0,
+        ordersByMonth: ordersByMonth.map(m => ({
+          month: m.month || 'Unknown',
+          orders: Number(m.orders),
+          revenue: Number(m.revenue),
+          profit: Number(m.revenue) - Number(m.cost),
+        })),
+        ordersByCustomer: ordersByCustomer.map(c => {
+          const revenue = Number(c.revenue);
+          const orders = Number(c.orders);
+          return {
+            customer: c.customer || 'Unknown',
+            orders,
+            revenue,
+            profit: revenue - Number(c.cost),
+            avgValue: orders > 0 ? revenue / orders : 0,
+          };
+        }),
+        ordersByStatus: ordersByStatus.map(s => ({
+          status: s.status || 'Unknown',
+          count: Number(s.count),
+          revenue: Number(s.revenue),
+        })),
+        topOrdersByValue: topOrders.map(o => ({
+          salesId: o.salesId || 'Unknown',
+          customer: o.customer || 'Unknown',
+          value: Number(o.value),
+          items: Number(o.items),
+          date: o.date || '',
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching orders analysis:", error);
+      res.status(500).json({ error: "Failed to fetch orders analysis" });
+    }
+  });
+
+  // Customer Analysis - comprehensive customer insights
+  app.get("/api/insights/customers", async (_req: Request, res: Response) => {
+    try {
+      // Overall customer metrics
+      const customerMetrics = await db.select({
+        totalCustomers: sql<number>`COUNT(DISTINCT ${inventory.invoicingName})`,
+        totalRevenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+      }).from(inventory)
+        .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")));
+
+      const totalCustomers = Number(customerMetrics[0]?.totalCustomers) || 0;
+      const totalRevenue = Number(customerMetrics[0]?.totalRevenue) || 0;
+
+      // Top customers by revenue
+      const topByRevenue = await db.select({
+        customer: inventory.invoicingName,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+        orders: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
+      }).from(inventory)
+        .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
+        .groupBy(inventory.invoicingName)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
+        .limit(15);
+
+      // Top customers by profit
+      const topByProfit = await db.select({
+        customer: inventory.invoicingName,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+        orders: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
+      }).from(inventory)
+        .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
+        .groupBy(inventory.invoicingName)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0) - COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`))
+        .limit(15);
+
+      // Top customers by volume
+      const topByVolume = await db.select({
+        customer: inventory.invoicingName,
+        units: count(),
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        orders: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
+      }).from(inventory)
+        .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
+        .groupBy(inventory.invoicingName)
+        .orderBy(desc(count()))
+        .limit(15);
+
+      // Customer concentration (top 5 % of revenue)
+      const top5Revenue = topByRevenue.slice(0, 5).reduce((sum, c) => sum + Number(c.revenue), 0);
+      const concentration = totalRevenue > 0 ? (top5Revenue / totalRevenue) * 100 : 0;
+
+      res.json({
+        totalCustomers,
+        totalRevenue,
+        averageRevenuePerCustomer: totalCustomers > 0 ? totalRevenue / totalCustomers : 0,
+        topByRevenue: topByRevenue.map(c => {
+          const revenue = Number(c.revenue);
+          const cost = Number(c.cost);
+          const profit = revenue - cost;
+          return {
+            customer: c.customer || 'Unknown',
+            revenue,
+            profit,
+            margin: revenue > 0 ? (profit / revenue) * 100 : 0,
+            orders: Number(c.orders),
+          };
+        }),
+        topByProfit: topByProfit.map(c => {
+          const revenue = Number(c.revenue);
+          const cost = Number(c.cost);
+          const profit = revenue - cost;
+          return {
+            customer: c.customer || 'Unknown',
+            revenue,
+            profit,
+            margin: revenue > 0 ? (profit / revenue) * 100 : 0,
+            orders: Number(c.orders),
+          };
+        }),
+        topByVolume: topByVolume.map(c => ({
+          customer: c.customer || 'Unknown',
+          units: Number(c.units),
+          revenue: Number(c.revenue),
+          orders: Number(c.orders),
+        })),
+        customerConcentration: concentration,
+        newCustomersLast90Days: 0, // Would need first order date tracking
+        atRiskCustomers: [], // Would need last order tracking
+      });
+    } catch (error) {
+      console.error("Error fetching customer analysis:", error);
+      res.status(500).json({ error: "Failed to fetch customer analysis" });
+    }
+  });
+
+  // Product Analysis - comprehensive product insights
+  app.get("/api/insights/products", async (_req: Request, res: Response) => {
+    try {
+      // Overall product metrics
+      const productMetrics = await db.select({
+        totalProducts: sql<number>`COUNT(DISTINCT CONCAT(${inventory.make}, '-', ${inventory.modelNum}))`,
+        totalRevenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+      }).from(inventory);
+
+      const totalProducts = Number(productMetrics[0]?.totalProducts) || 0;
+      const totalRevenue = Number(productMetrics[0]?.totalRevenue) || 0;
+
+      // Top products by revenue
+      const topByRevenue = await db.select({
+        make: inventory.make,
+        model: inventory.modelNum,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+        units: count(),
+      }).from(inventory)
+        .groupBy(inventory.make, inventory.modelNum)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
+        .limit(15);
+
+      // Top products by profit
+      const topByProfit = await db.select({
+        make: inventory.make,
+        model: inventory.modelNum,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+        units: count(),
+      }).from(inventory)
+        .groupBy(inventory.make, inventory.modelNum)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0) - COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`))
+        .limit(15);
+
+      // Top products by volume
+      const topByVolume = await db.select({
+        make: inventory.make,
+        model: inventory.modelNum,
+        units: count(),
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+      }).from(inventory)
+        .groupBy(inventory.make, inventory.modelNum)
+        .orderBy(desc(count()))
+        .limit(15);
+
+      // Products by category
+      const productsByCategory = await db.select({
+        category: inventory.category,
+        products: sql<number>`COUNT(DISTINCT CONCAT(${inventory.make}, '-', ${inventory.modelNum}))`,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        units: count(),
+      }).from(inventory)
+        .groupBy(inventory.category)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`));
+
+      res.json({
+        totalProducts,
+        totalRevenue,
+        topByRevenue: topByRevenue.map(p => {
+          const revenue = Number(p.revenue);
+          const cost = Number(p.cost);
+          const profit = revenue - cost;
+          return {
+            product: `${p.make || ''} ${p.model || ''}`.trim() || 'Unknown',
+            make: p.make || 'Unknown',
+            revenue,
+            profit,
+            margin: revenue > 0 ? (profit / revenue) * 100 : 0,
+            units: Number(p.units),
+          };
+        }),
+        topByProfit: topByProfit.map(p => {
+          const revenue = Number(p.revenue);
+          const cost = Number(p.cost);
+          const profit = revenue - cost;
+          return {
+            product: `${p.make || ''} ${p.model || ''}`.trim() || 'Unknown',
+            make: p.make || 'Unknown',
+            revenue,
+            profit,
+            margin: revenue > 0 ? (profit / revenue) * 100 : 0,
+            units: Number(p.units),
+          };
+        }),
+        topByVolume: topByVolume.map(p => ({
+          product: `${p.make || ''} ${p.model || ''}`.trim() || 'Unknown',
+          make: p.make || 'Unknown',
+          units: Number(p.units),
+          revenue: Number(p.revenue),
+        })),
+        productsByCategory: productsByCategory.map(c => ({
+          category: c.category || 'Unknown',
+          products: Number(c.products),
+          revenue: Number(c.revenue),
+          units: Number(c.units),
+        })),
+        slowMovers: [], // Would need inventory age tracking
+      });
+    } catch (error) {
+      console.error("Error fetching product analysis:", error);
+      res.status(500).json({ error: "Failed to fetch product analysis" });
+    }
+  });
+
+  // Executive Summary - all critical insights in one call
+  app.get("/api/insights/executive-summary", async (_req: Request, res: Response) => {
+    try {
+      // Get KPIs
+      const kpiResult = await db.select({
+        totalRevenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        totalCost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+        unitsSold: count(),
+        totalOrders: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
+      }).from(inventory);
+
+      const totalRevenue = Number(kpiResult[0]?.totalRevenue) || 0;
+      const totalCost = Number(kpiResult[0]?.totalCost) || 0;
+      const totalProfit = totalRevenue - totalCost;
+      const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+      const unitsSold = Number(kpiResult[0]?.unitsSold) || 0;
+      const totalOrders = Number(kpiResult[0]?.totalOrders) || 0;
+
+      // Best/worst performing categories
+      const categoryPerformance = await db.select({
+        category: inventory.category,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+        cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+      }).from(inventory)
+        .where(and(isNotNull(inventory.category), ne(inventory.category, "")))
+        .groupBy(inventory.category)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0) - COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`));
+
+      // Top customer
+      const topCustomer = await db.select({
+        customer: inventory.invoicingName,
+        revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+      }).from(inventory)
+        .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
+        .groupBy(inventory.invoicingName)
+        .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
+        .limit(1);
+
+      // Returns count for alerts
+      const returnsCount = await db.select({ count: count() }).from(returns);
+      const returnRate = unitsSold > 0 ? (Number(returnsCount[0]?.count) / unitsSold) * 100 : 0;
+
+      // Generate critical alerts
+      const criticalAlerts: any[] = [];
+
+      if (profitMargin < 10) {
+        criticalAlerts.push({
+          type: 'margin_erosion',
+          severity: profitMargin < 5 ? 'high' : 'medium',
+          title: 'Low Overall Profit Margin',
+          description: `Overall margin at ${profitMargin.toFixed(1)}% requires attention`,
+          currentMargin: profitMargin,
+          impactValue: totalProfit,
+          recommendation: 'Review pricing strategy and cost structure across all categories',
+        });
+      }
+
+      if (returnRate > 5) {
+        criticalAlerts.push({
+          type: 'early_failure',
+          severity: returnRate > 10 ? 'high' : 'medium',
+          title: 'Elevated Return Rate',
+          description: `Return rate at ${returnRate.toFixed(1)}% exceeds acceptable threshold`,
+          value: returnRate,
+          recommendation: 'Investigate quality issues and customer feedback patterns',
+        });
+      }
+
+      res.json({
+        kpis: {
+          totalRevenue,
+          totalCost,
+          totalProfit,
+          profitMargin,
+          unitsSold,
+          averageOrderValue: totalOrders > 0 ? totalRevenue / totalOrders : 0,
+          totalOrders,
+        },
+        criticalAlerts,
+        recentTrends: {
+          revenueChange: 0, // Would need historical data comparison
+          profitChange: 0,
+          marginChange: 0,
+          returnRateChange: 0,
+          period: 'vs. previous period',
+        },
+        quickInsights: {
+          bestPerformingCategory: categoryPerformance[0]?.category || 'N/A',
+          worstPerformingCategory: categoryPerformance[categoryPerformance.length - 1]?.category || 'N/A',
+          topCustomer: topCustomer[0]?.customer || 'N/A',
+          highestRiskSupplier: 'N/A', // Would need supplier quality tracking
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching executive summary:", error);
+      res.status(500).json({ error: "Failed to fetch executive summary" });
+    }
+  });
+
+  // ============================================
   // REFRESH DB - Scheduled Data Sync Endpoint
   // ============================================
   

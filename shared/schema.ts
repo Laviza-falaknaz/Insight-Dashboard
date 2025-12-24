@@ -352,3 +352,185 @@ export interface FilterDropdownOptions {
   vendors: string[];
   grades: string[];
 }
+
+// Executive Insight Types
+
+// Freight Analysis
+export interface FreightAlert {
+  type: 'spike' | 'erosion' | 'concentration' | 'volatility';
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  supplier?: string;
+  category?: string;
+  value: number;
+  baseline?: number;
+  percentChange?: number;
+  affectedItems?: number;
+  recommendation: string;
+}
+
+export interface FreightAnalysis {
+  totalFreightCost: number;
+  freightAsPercentOfCost: number;
+  averageFreightPerUnit: number;
+  freightBySupplier: { supplier: string; cost: number; itemCount: number; avgPerUnit: number }[];
+  freightByCategory: { category: string; cost: number; itemCount: number; avgPerUnit: number }[];
+  freightConcentrationRisk: number; // % from top 3 suppliers
+  alerts: FreightAlert[];
+}
+
+// Inventory Aging
+export interface AgingBucket {
+  range: string;
+  count: number;
+  value: number;
+  percentOfTotal: number;
+}
+
+export interface InventoryAgingAlert {
+  type: 'dead_stock' | 'aging' | 'capital_lockup' | 'slow_moving';
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  itemId?: string;
+  category?: string;
+  daysHeld?: number;
+  value: number;
+  recommendation: string;
+}
+
+export interface InventoryAgingAnalysis {
+  totalInventoryValue: number;
+  averageDaysHeld: number;
+  agingBuckets: AgingBucket[];
+  deadStockValue: number;
+  deadStockCount: number;
+  slowMovingValue: number;
+  slowMovingCount: number;
+  capitalLockupByCategory: { category: string; value: number; avgDays: number }[];
+  alerts: InventoryAgingAlert[];
+}
+
+// Returns/RMA Analysis
+export interface RMAAlert {
+  type: 'early_failure' | 'repeat_failure' | 'supplier_quality' | 'margin_destroyed';
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  value?: number;
+  affectedItems?: number;
+  recommendation: string;
+}
+
+export interface ReturnsAnalysis {
+  totalReturns: number;
+  returnRate: number;
+  returnsLast30Days: number;
+  returnsByReason: { reason: string; count: number; percent: number }[];
+  returnsByStatus: { status: string; count: number }[];
+  topReturnCustomers: { customer: string; count: number; rate: number }[];
+  earlyFailureCount: number; // RMAs within 30 days of sale
+  repeatFailures: number; // Same serial multiple RMAs
+  alerts: RMAAlert[];
+}
+
+// Supplier Quality
+export interface SupplierQualityScore {
+  supplier: string;
+  qualityScore: number; // 0-100
+  defectRate: number;
+  returnRate: number;
+  freightVariability: number;
+  totalUnits: number;
+  totalValue: number;
+  trend: 'improving' | 'stable' | 'declining';
+}
+
+export interface SupplierAnalysis {
+  totalSuppliers: number;
+  topPerformers: SupplierQualityScore[];
+  atRiskSuppliers: SupplierQualityScore[];
+  concentrationRisk: number; // % from top 3
+  topByVolume: { supplier: string; units: number; value: number }[];
+}
+
+// Margin Analysis
+export interface MarginAlert {
+  type: 'negative_margin' | 'margin_erosion' | 'price_pressure' | 'cost_overrun';
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  category?: string;
+  product?: string;
+  currentMargin: number;
+  previousMargin?: number;
+  impactValue: number;
+  recommendation: string;
+}
+
+export interface MarginAnalysis {
+  overallMargin: number;
+  marginByCategory: { category: string; margin: number; revenue: number; profit: number }[];
+  marginByMake: { make: string; margin: number; revenue: number; profit: number }[];
+  negativeMarginItems: number;
+  negativeMarginValue: number;
+  marginTrend: { period: string; margin: number }[];
+  alerts: MarginAlert[];
+}
+
+// Orders Analysis
+export interface OrdersAnalysis {
+  totalOrders: number;
+  totalRevenue: number;
+  totalProfit: number;
+  averageOrderValue: number;
+  itemsPerOrder: number;
+  ordersByMonth: { month: string; orders: number; revenue: number; profit: number }[];
+  ordersByCustomer: { customer: string; orders: number; revenue: number; profit: number; avgValue: number }[];
+  ordersByStatus: { status: string; count: number; revenue: number }[];
+  topOrdersByValue: { salesId: string; customer: string; value: number; items: number; date: string }[];
+}
+
+// Customer Analysis
+export interface CustomerAnalysis {
+  totalCustomers: number;
+  totalRevenue: number;
+  averageRevenuePerCustomer: number;
+  topByRevenue: { customer: string; revenue: number; profit: number; margin: number; orders: number }[];
+  topByProfit: { customer: string; revenue: number; profit: number; margin: number; orders: number }[];
+  topByVolume: { customer: string; units: number; revenue: number; orders: number }[];
+  customerConcentration: number; // % from top 5
+  newCustomersLast90Days: number;
+  atRiskCustomers: { customer: string; lastOrder: string; totalValue: number; daysSinceLast: number }[];
+}
+
+// Product Analysis
+export interface ProductAnalysis {
+  totalProducts: number;
+  totalRevenue: number;
+  topByRevenue: { product: string; make: string; revenue: number; profit: number; margin: number; units: number }[];
+  topByProfit: { product: string; make: string; revenue: number; profit: number; margin: number; units: number }[];
+  topByVolume: { product: string; make: string; units: number; revenue: number }[];
+  productsByCategory: { category: string; products: number; revenue: number; units: number }[];
+  slowMovers: { product: string; daysInStock: number; value: number; units: number }[];
+}
+
+// Executive Summary Dashboard
+export interface ExecutiveSummary {
+  kpis: KPISummary;
+  criticalAlerts: (FreightAlert | InventoryAgingAlert | RMAAlert | MarginAlert)[];
+  recentTrends: {
+    revenueChange: number;
+    profitChange: number;
+    marginChange: number;
+    returnRateChange: number;
+    period: string;
+  };
+  quickInsights: {
+    bestPerformingCategory: string;
+    worstPerformingCategory: string;
+    topCustomer: string;
+    highestRiskSupplier: string;
+  };
+}

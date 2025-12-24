@@ -1,0 +1,294 @@
+1. Freight Cost Spike by Supplier
+
+Tagline
+Unexpected freight cost increase for a supplier
+
+Technical Definition
+
+Metric: FreightChargesUSD / PurchPriceUSD
+
+Grain: VendName + month(PurchDate)
+
+Baseline: trailing 6-month rolling average per supplier
+
+Trigger: current month ratio > baseline × 1.25
+
+Output: supplier, delta %, affected ItemIds
+
+2. Freight Cost Spike by Product Category
+
+Metric
+
+AVG(FreightChargesUSD)
+
+Group by: Category + month(PurchDate)
+
+Baseline: previous 3 months avg
+
+Trigger: increase > 20% month-over-month
+
+3. Freight Cost Margin Erosion Impact
+
+Metric
+
+(FinalSalesPriceUSD - FinalTotalCostUSD)
+
+Recompute margin with and without freight
+
+Group by: SalesId
+
+Trigger: freight accounts for >40% of margin loss
+
+4. Abnormal Freight per Unit Weight Proxy
+
+Metric
+
+FreightChargesUSD / (Ram + HDD)
+
+Group by: Make + ModelNum
+
+Trigger: z-score > 2 vs historical distribution
+
+5. Freight Cost Recovery Failure
+
+Metric
+
+(FinalSalesPriceUSD - FinalTotalCostUSD)
+
+Filter: FreightChargesUSD increased >15% vs purchase baseline
+
+Trigger: margin < target threshold
+
+6. Supplier Freight Volatility Score
+
+Metric
+
+STDDEV(FreightChargesUSD)
+
+Group by: VendName (last 6 months)
+
+Output: volatility index (normalized 0–100)
+
+7. Freight Cost Drift Over Time
+
+Metric
+
+Linear regression slope of FreightChargesUSD
+
+Group by: VendName + Category
+
+Trigger: positive slope statistically significant (p < 0.05)
+
+8. Hidden Freight Leakage
+
+Metric
+
+FreightChargesUSD / TotalCostCurUSD
+
+Group by: ItemId
+
+Trigger: ratio above category 90th percentile
+
+9. Freight vs Sales Price Elasticity
+
+Metric
+
+Correlation between FreightChargesUSD and FinalSalesPriceUSD
+
+Group by: Category
+
+Flag: weak correlation → cost not passed to customer
+
+10. Freight Cost Concentration Risk
+
+Metric
+
+% of total freight cost from top 3 suppliers
+
+Group by: rolling 12 months
+
+Trigger: >65% concentration
+
+B. INVENTORY & AGING (11–20)
+11. Inventory Aging Margin Decay
+
+Metric
+
+Margin at sale date vs days held
+
+DATEDIFF(InvoiceDate, PurchDate)
+
+Group by: ModelNum
+
+Trigger: margin drops >X% after Y days
+
+12. Dead Stock Probability Score
+
+Metric Inputs
+
+Inventory age
+
+Historical sales velocity for same ModelNum
+
+Current stock count
+
+Output
+
+Logistic score 0–1
+
+Flag: >0.7 = high dead stock risk
+
+13. Cost Accumulation Without Value Gain
+
+Metric
+
+TotalCostCurUSD increase over time
+
+FinalSalesPriceUSD static
+
+Group by: ItemId
+
+Trigger: cost ↑ >15%, price ↑ <5%
+
+14. Inventory Capital Lock-Up
+
+Metric
+
+TotalCostCurUSD × DaysUnsold
+
+Group by: Category
+
+Rank: top contributors
+
+15. Aging + Warranty Overlap Risk
+
+Metric
+
+WarrantyEndDate - InvoiceDate
+
+Trigger: items sold late but >70% warranty remaining
+
+16. Slow-Moving High-Cost Items
+
+Metric
+
+TotalCostCurUSD
+
+Filter: top 20% cost, bottom 30% sales velocity
+
+17. Purchase Timing Penalty
+
+Metric
+
+Margin vs DATEDIFF(SalesOrderDate, PurchDate)
+
+Group by: Category
+
+Trigger: negative correlation
+
+18. Spec Overinvestment Signal
+
+Metric
+
+Incremental cost of RAM/HDD vs sales uplift
+
+Group by: ModelNum
+
+Trigger: ROI < 1.0
+
+19. Inventory Turn Collapse
+
+Metric
+
+Inventory turnover rate MoM
+
+Trigger: decline >25% with stock increase
+
+20. Inventory Quality Risk Cluster
+
+Metric
+
+RMAs per serial by SupplierPalletNum
+
+Trigger: pallet RMA rate >2× baseline
+
+C. RETURNS & WARRANTY (21–30)
+21. Early Failure Indicator
+
+Metric
+
+DATEDIFF(RMA.CreatedOn, InvoiceDate)
+
+Trigger: RMAs within 30 days > baseline
+
+22. Margin Destroyed by Returns
+
+Metric
+
+(Original Margin – RMA Handling Cost)
+
+Group by: SalesId
+
+Flag: negative net margin
+
+23. Serial Repeat Failure Detection
+
+Metric
+
+Count of RMAs per ManufacturerSerialNum
+
+Trigger: >1 occurrence
+
+24. Warranty Cost Exposure Forecast
+
+Metric
+
+Active warranties × historical RMA rate × avg repair cost
+
+Group by: ModelNum
+
+25. Supplier Quality Degradation
+
+Metric
+
+RMAs per supplier per quarter
+
+Trigger: upward trend >20% QoQ
+
+26. Testing Gap Failure Rate
+
+Metric
+
+RMAs where ItemTestingDate IS NULL
+
+Compare vs tested units
+
+27. Replacement Cost Explosion
+
+Metric
+
+Replacement unit cost – original margin
+
+Trigger: replacement exceeds original profit
+
+28. RMA Reason Dominance Shift
+
+Metric
+
+% distribution of ReasonForReturn
+
+Trigger: top reason changes suddenly
+
+29. Preventable RMA Index
+
+Metric
+
+RMAs tagged quality/process vs total RMAs
+
+30. Warranty Abuse Detection
+
+Metric
+
+RMAs per customer per 100 units sold
+
+Trigger: >2× average
