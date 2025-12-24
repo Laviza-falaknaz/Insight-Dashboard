@@ -2,17 +2,26 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import passport from "passport";
 import { db, pool } from "./db";
-import { inventory, dataUploads, returns, users, themePresets, type ThemeId } from "@shared/schema";
+import { inventory, dataUploads, returns, users, themePresets, savedCollections, type ThemeId } from "@shared/schema";
 import { eq, sql, and, gte, lte, inArray, desc, asc, count, sum, isNotNull, ne } from "drizzle-orm";
 import { setupAuth, requireAuth, requireAdminToken, registerUser } from "./auth";
+import OpenAI from "openai";
 import type { 
   DashboardData, 
   FilterDropdownOptions,
   KPISummary,
   TimeSeriesPoint,
   CategoryBreakdown,
-  TopPerformer
+  TopPerformer,
+  AIInsightRequest,
+  AIInsightResponse,
+  DrillDownConfig
 } from "@shared/schema";
+
+// Initialize OpenAI client (optional - only if API key is provided)
+const openai = process.env.OPENAI_API_KEY 
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
 
 // Power Automate endpoint for SQL queries (from environment variable)
 const POWER_AUTOMATE_URL = process.env.POWER_AUTOMATE_URL || "";
@@ -2299,6 +2308,385 @@ export async function registerRoutes(
         });
       }
     })();
+  });
+
+  // ============================================
+  // AI INSIGHTS - OpenAI-powered recommendations
+  // ============================================
+
+  app.post("/api/ai/insights", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { context, data } = req.body as AIInsightRequest;
+
+      if (!openai) {
+        // Fallback to rule-based insights if no OpenAI key
+        const fallbackInsights = generateRuleBasedInsights(context, data);
+        return res.json(fallbackInsights);
+      }
+
+      const systemPrompt = `You are an expert business analyst providing executive insights for an inventory management dashboard. 
+Analyze the provided data and return actionable insights in JSON format with the following structure:
+{
+  "summary": "A concise 2-3 sentence executive summary",
+  "keyFindings": ["Finding 1", "Finding 2", "Finding 3"],
+  "recommendations": ["Recommendation 1", "Recommendation 2", "Recommendation 3"],
+  "risks": ["Risk 1", "Risk 2"],
+  "opportunities": ["Opportunity 1", "Opportunity 2"]
+}
+
+Focus on:
+- Revenue and profit optimization
+- Cost reduction opportunities
+- Inventory efficiency
+- Customer relationship insights
+- Supplier performance
+- Market trends and patterns
+
+Be specific with numbers and percentages when available. Prioritize actionable recommendations.`;
+
+      const userPrompt = `Analyze this ${context} data and provide executive insights:\n\n${JSON.stringify(data, null, 2)}`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 1000,
+      });
+
+      const responseContent = completion.choices[0]?.message?.content;
+      if (!responseContent) {
+        throw new Error("No response from AI");
+      }
+
+      const insights = JSON.parse(responseContent);
+      
+      res.json({
+        ...insights,
+        generatedAt: new Date().toISOString(),
+      } as AIInsightResponse);
+    } catch (error) {
+      console.error("Error generating AI insights:", error);
+      // Fallback to rule-based insights on error
+      const fallbackInsights = generateRuleBasedInsights(req.body.context, req.body.data);
+      res.json(fallbackInsights);
+    }
+  });
+
+  // Helper function for rule-based insights when OpenAI is not available
+  function generateRuleBasedInsights(context: string, data: Record<string, any>): AIInsightResponse {
+    const insights: AIInsightResponse = {
+      summary: "",
+      keyFindings: [],
+      recommendations: [],
+      risks: [],
+      opportunities: [],
+      generatedAt: new Date().toISOString(),
+    };
+
+    switch (context) {
+      case 'executive_summary':
+        const kpis = data.kpis || {};
+        insights.summary = `Total revenue is $${(kpis.totalRevenue || 0).toLocaleString()} with a ${(kpis.profitMargin || 0).toFixed(1)}% profit margin across ${kpis.unitsSold || 0} units sold.`;
+        if (kpis.profitMargin < 15) {
+          insights.keyFindings.push(`Profit margin of ${kpis.profitMargin?.toFixed(1)}% is below the target threshold of 15%`);
+          insights.recommendations.push("Review pricing strategy and negotiate better supplier terms to improve margins");
+        }
+        if (kpis.averageOrderValue > 0) {
+          insights.keyFindings.push(`Average order value is $${kpis.averageOrderValue?.toFixed(2)}`);
+        }
+        break;
+
+      case 'freight':
+        if (data.freightAsPercentOfCost > 10) {
+          insights.keyFindings.push(`Freight costs represent ${data.freightAsPercentOfCost?.toFixed(1)}% of total costs`);
+          insights.recommendations.push("Consolidate shipments and negotiate volume discounts with carriers");
+        }
+        if (data.freightConcentrationRisk > 50) {
+          insights.risks.push(`High supplier concentration: ${data.freightConcentrationRisk?.toFixed(0)}% of freight from top 3 suppliers`);
+        }
+        break;
+
+      case 'inventory':
+        if (data.deadStockValue > 0) {
+          insights.risks.push(`Dead stock valued at $${data.deadStockValue?.toLocaleString()} requires attention`);
+          insights.recommendations.push("Consider liquidation strategies or promotional campaigns for aging inventory");
+        }
+        if (data.averageDaysHeld > 90) {
+          insights.keyFindings.push(`Average inventory holding period of ${data.averageDaysHeld} days exceeds 90-day target`);
+        }
+        break;
+
+      case 'margins':
+        if (data.negativeMarginItems > 0) {
+          insights.risks.push(`${data.negativeMarginItems} items sold at negative margin totaling $${data.negativeMarginValue?.toLocaleString()} in losses`);
+          insights.recommendations.push("Review pricing for negative margin products and consider discontinuation");
+        }
+        break;
+
+      case 'customers':
+        if (data.customerConcentration > 40) {
+          insights.risks.push(`Top 5 customers account for ${data.customerConcentration?.toFixed(0)}% of revenue - high concentration risk`);
+          insights.recommendations.push("Diversify customer base through targeted marketing and new customer acquisition");
+        }
+        break;
+
+      default:
+        insights.summary = "Analysis complete. Review the data for detailed insights.";
+    }
+
+    if (insights.keyFindings.length === 0) {
+      insights.keyFindings.push("Data patterns are within expected ranges");
+    }
+    if (!insights.summary) {
+      insights.summary = `${context.charAt(0).toUpperCase() + context.slice(1)} analysis indicates stable operations with opportunities for optimization.`;
+    }
+    if (insights.opportunities.length === 0) {
+      insights.opportunities.push("Continue monitoring key metrics for emerging trends");
+    }
+
+    return insights;
+  }
+
+  // ============================================
+  // SAVED COLLECTIONS - CRUD endpoints
+  // ============================================
+
+  // Get all saved collections for current user
+  app.get("/api/collections", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = req.user as any;
+      const collections = await db.select()
+        .from(savedCollections)
+        .where(eq(savedCollections.userId, user.id))
+        .orderBy(desc(savedCollections.createdAt));
+      
+      res.json(collections);
+    } catch (error) {
+      console.error("Error fetching collections:", error);
+      res.status(500).json({ error: "Failed to fetch collections" });
+    }
+  });
+
+  // Get single collection
+  app.get("/api/collections/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = req.user as any;
+      const collectionId = parseInt(req.params.id);
+      
+      const collection = await db.select()
+        .from(savedCollections)
+        .where(and(
+          eq(savedCollections.id, collectionId),
+          eq(savedCollections.userId, user.id)
+        ))
+        .limit(1);
+      
+      if (collection.length === 0) {
+        return res.status(404).json({ error: "Collection not found" });
+      }
+      
+      res.json(collection[0]);
+    } catch (error) {
+      console.error("Error fetching collection:", error);
+      res.status(500).json({ error: "Failed to fetch collection" });
+    }
+  });
+
+  // Create new collection
+  app.post("/api/collections", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = req.user as any;
+      const { name, description, insightType, queryConfig, chartType } = req.body;
+
+      if (!name || !insightType || !queryConfig) {
+        return res.status(400).json({ error: "Name, insightType, and queryConfig are required" });
+      }
+
+      const result = await db.insert(savedCollections)
+        .values({
+          userId: user.id,
+          name,
+          description: description || null,
+          insightType,
+          queryConfig: typeof queryConfig === 'string' ? queryConfig : JSON.stringify(queryConfig),
+          chartType: chartType || null,
+        })
+        .returning();
+
+      res.status(201).json(result[0]);
+    } catch (error) {
+      console.error("Error creating collection:", error);
+      res.status(500).json({ error: "Failed to create collection" });
+    }
+  });
+
+  // Update collection
+  app.patch("/api/collections/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = req.user as any;
+      const collectionId = parseInt(req.params.id);
+      const { name, description, queryConfig, chartType } = req.body;
+
+      const updateData: Partial<typeof savedCollections.$inferInsert> = {
+        updatedAt: new Date(),
+      };
+      if (name !== undefined) updateData.name = name;
+      if (description !== undefined) updateData.description = description;
+      if (queryConfig !== undefined) {
+        updateData.queryConfig = typeof queryConfig === 'string' ? queryConfig : JSON.stringify(queryConfig);
+      }
+      if (chartType !== undefined) updateData.chartType = chartType;
+
+      const result = await db.update(savedCollections)
+        .set(updateData)
+        .where(and(
+          eq(savedCollections.id, collectionId),
+          eq(savedCollections.userId, user.id)
+        ))
+        .returning();
+
+      if (result.length === 0) {
+        return res.status(404).json({ error: "Collection not found" });
+      }
+
+      res.json(result[0]);
+    } catch (error) {
+      console.error("Error updating collection:", error);
+      res.status(500).json({ error: "Failed to update collection" });
+    }
+  });
+
+  // Delete collection
+  app.delete("/api/collections/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = req.user as any;
+      const collectionId = parseInt(req.params.id);
+
+      const result = await db.delete(savedCollections)
+        .where(and(
+          eq(savedCollections.id, collectionId),
+          eq(savedCollections.userId, user.id)
+        ))
+        .returning();
+
+      if (result.length === 0) {
+        return res.status(404).json({ error: "Collection not found" });
+      }
+
+      res.json({ success: true, deleted: result[0] });
+    } catch (error) {
+      console.error("Error deleting collection:", error);
+      res.status(500).json({ error: "Failed to delete collection" });
+    }
+  });
+
+  // ============================================
+  // DRILL-DOWN - Dynamic data exploration
+  // ============================================
+
+  app.post("/api/explore/:insightType", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { insightType } = req.params;
+      const config = req.body as DrillDownConfig;
+      
+      let result: any[] = [];
+      const limit = config.limit || 50;
+
+      switch (insightType) {
+        case 'category':
+          result = await db.select({
+            category: sql<string>`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`,
+            revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+            cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+            profit: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0) - COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+            units: count(),
+          }).from(inventory)
+            .groupBy(sql`UPPER(COALESCE(${inventory.category}, 'UNKNOWN'))`)
+            .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
+            .limit(limit);
+          break;
+
+        case 'customer':
+          result = await db.select({
+            customer: sql<string>`UPPER(${inventory.invoicingName})`,
+            revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+            cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+            profit: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0) - COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+            units: count(),
+            orders: sql<number>`COUNT(DISTINCT ${inventory.salesId})`,
+          }).from(inventory)
+            .where(and(isNotNull(inventory.invoicingName), ne(inventory.invoicingName, "")))
+            .groupBy(sql`UPPER(${inventory.invoicingName})`)
+            .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
+            .limit(limit);
+          break;
+
+        case 'vendor':
+          result = await db.select({
+            vendor: sql<string>`UPPER(COALESCE(${inventory.vendName}, 'UNKNOWN'))`,
+            cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+            freight: sql<number>`COALESCE(SUM(CAST(${inventory.freightChargesUSD} as numeric)), 0)`,
+            units: count(),
+          }).from(inventory)
+            .groupBy(sql`UPPER(COALESCE(${inventory.vendName}, 'UNKNOWN'))`)
+            .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`))
+            .limit(limit);
+          break;
+
+        case 'product':
+          result = await db.select({
+            make: sql<string>`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`,
+            model: inventory.modelNum,
+            revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+            cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+            profit: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0) - COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+            units: count(),
+          }).from(inventory)
+            .groupBy(sql`UPPER(COALESCE(${inventory.make}, 'UNKNOWN'))`, inventory.modelNum)
+            .orderBy(desc(sql`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`))
+            .limit(limit);
+          break;
+
+        case 'monthly':
+          result = await db.select({
+            month: sql<string>`TO_CHAR(TO_DATE(${inventory.invoiceDate}, 'YYYY-MM-DD'), 'YYYY-MM')`,
+            revenue: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0)`,
+            cost: sql<number>`COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+            profit: sql<number>`COALESCE(SUM(CAST(${inventory.finalSalesPriceUSD} as numeric)), 0) - COALESCE(SUM(CAST(${inventory.finalTotalCostUSD} as numeric)), 0)`,
+            units: count(),
+          }).from(inventory)
+            .where(isNotNull(inventory.invoiceDate))
+            .groupBy(sql`TO_CHAR(TO_DATE(${inventory.invoiceDate}, 'YYYY-MM-DD'), 'YYYY-MM')`)
+            .orderBy(sql`TO_CHAR(TO_DATE(${inventory.invoiceDate}, 'YYYY-MM-DD'), 'YYYY-MM')`)
+            .limit(limit);
+          break;
+
+        default:
+          return res.status(400).json({ error: "Invalid insight type" });
+      }
+
+      res.json({
+        insightType,
+        config,
+        data: result.map(row => ({
+          ...row,
+          revenue: Number(row.revenue) || 0,
+          cost: Number(row.cost) || 0,
+          profit: Number(row.profit) || 0,
+          freight: Number(row.freight) || 0,
+          units: Number(row.units) || 0,
+          orders: Number(row.orders) || 0,
+          margin: row.revenue > 0 ? ((Number(row.profit) / Number(row.revenue)) * 100) : 0,
+        })),
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Error executing drill-down:", error);
+      res.status(500).json({ error: "Failed to execute drill-down query" });
+    }
   });
 
   return httpServer;
