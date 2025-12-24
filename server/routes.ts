@@ -1,8 +1,10 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
+import passport from "passport";
 import { db, pool } from "./db";
-import { inventory, dataUploads, returns } from "@shared/schema";
+import { inventory, dataUploads, returns, users, themePresets, type ThemeId } from "@shared/schema";
 import { eq, sql, and, gte, lte, inArray, desc, asc, count, sum, isNotNull, ne } from "drizzle-orm";
+import { setupAuth, requireAuth, requireAdminToken, registerUser } from "./auth";
 import type { 
   DashboardData, 
   FilterDropdownOptions,
@@ -86,6 +88,138 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  
+  // Setup authentication
+  setupAuth(app);
+  
+  // ========== AUTHENTICATION ROUTES ==========
+  
+  // Register new user
+  app.post("/api/auth/register", async (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body;
+      
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password required" });
+      }
+      
+      if (password.length < 6) {
+        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      }
+      
+      const user = await registerUser(email, password);
+      
+      req.login({ id: user.id, email: user.email, themeId: user.themeId, isAdmin: user.isAdmin }, (err) => {
+        if (err) {
+          return res.status(500).json({ error: "Login failed after registration" });
+        }
+        res.json({ 
+          user: { id: user.id, email: user.email, themeId: user.themeId, isAdmin: user.isAdmin } 
+        });
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Registration failed";
+      res.status(400).json({ error: message });
+    }
+  });
+  
+  // Login
+  app.post("/api/auth/login", (req: Request, res: Response, next) => {
+    passport.authenticate("local", (err: Error | null, user: Express.User | false, info: { message: string } | undefined) => {
+      if (err) {
+        return res.status(500).json({ error: "Authentication error" });
+      }
+      if (!user) {
+        return res.status(401).json({ error: info?.message || "Invalid credentials" });
+      }
+      req.login(user, (loginErr) => {
+        if (loginErr) {
+          return res.status(500).json({ error: "Login failed" });
+        }
+        res.json({ user: { id: user.id, email: user.email, themeId: user.themeId, isAdmin: user.isAdmin } });
+      });
+    })(req, res, next);
+  });
+  
+  // Logout
+  app.post("/api/auth/logout", (req: Request, res: Response) => {
+    req.logout((err) => {
+      if (err) {
+        return res.status(500).json({ error: "Logout failed" });
+      }
+      res.json({ message: "Logged out successfully" });
+    });
+  });
+  
+  // Get current user
+  app.get("/api/auth/me", (req: Request, res: Response) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    res.json({ user: req.user });
+  });
+  
+  // Update user theme
+  app.patch("/api/auth/theme", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { themeId } = req.body;
+      
+      if (!themeId || !Object.keys(themePresets).includes(themeId)) {
+        return res.status(400).json({ error: "Invalid theme ID" });
+      }
+      
+      await db
+        .update(users)
+        .set({ themeId })
+        .where(eq(users.id, req.user!.id));
+      
+      res.json({ themeId, theme: themePresets[themeId as ThemeId] });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update theme" });
+    }
+  });
+  
+  // Get theme presets
+  app.get("/api/themes", (_req: Request, res: Response) => {
+    res.json(themePresets);
+  });
+  
+  // ========== ADMIN ROUTES (Token Protected) ==========
+  
+  // Admin: Trigger database refresh
+  app.get("/api/admin/refresh/trigger", requireAdminToken, async (_req: Request, res: Response) => {
+    if (refreshStatus.isRunning) {
+      return res.status(409).json({ 
+        error: "Refresh already in progress", 
+        status: refreshStatus 
+      });
+    }
+    
+    // Trigger the refresh by calling the internal endpoint
+    const response = await fetch(`http://localhost:5000/api/refresh/db`);
+    const data = await response.json();
+    res.json(data);
+  });
+  
+  // Admin: Get refresh status
+  app.get("/api/admin/refresh/status", requireAdminToken, async (_req: Request, res: Response) => {
+    res.json(refreshStatus);
+  });
+  
+  // Admin: Get refresh logs (activity trace)
+  app.get("/api/admin/refresh/logs", requireAdminToken, async (_req: Request, res: Response) => {
+    try {
+      const logs = await db
+        .select()
+        .from(dataUploads)
+        .orderBy(desc(dataUploads.uploadedAt))
+        .limit(50);
+      
+      res.json({ logs, currentStatus: refreshStatus });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch logs" });
+    }
+  });
   
   // Upload data endpoint - accepts JSON array of inventory items
   app.post("/api/data/upload", async (req: Request, res: Response) => {
