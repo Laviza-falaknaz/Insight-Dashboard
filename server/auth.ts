@@ -23,6 +23,8 @@ declare global {
 }
 
 export function setupAuth(app: Express) {
+  const isProduction = process.env.NODE_ENV === "production";
+  
   const sessionMiddleware = session({
     store: new PgSession({
       pool: pool,
@@ -36,8 +38,8 @@ export function setupAuth(app: Express) {
     cookie: {
       maxAge: 15 * 60 * 1000,
       httpOnly: true,
-      secure: false,
-      sameSite: "lax",
+      secure: isProduction,
+      sameSite: isProduction ? "strict" : "lax",
     },
   });
 
@@ -131,7 +133,7 @@ export const requireAdmin: RequestHandler = (req, res, next) => {
 };
 
 export const requireAdminToken: RequestHandler = (req, res, next) => {
-  const token = req.headers["x-admin-token"] || req.query.token;
+  const token = req.headers["x-admin-token"];
   const adminToken = process.env.ADMIN_TOKEN;
 
   if (!adminToken) {
@@ -139,7 +141,7 @@ export const requireAdminToken: RequestHandler = (req, res, next) => {
   }
 
   if (token !== adminToken) {
-    return res.status(403).json({ error: "Invalid admin token" });
+    return res.status(403).json({ error: "Invalid admin token. Provide token via X-Admin-Token header." });
   }
 
   next();

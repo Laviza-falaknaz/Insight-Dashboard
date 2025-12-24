@@ -37,7 +37,9 @@ export default function Admin() {
   const fetchStatus = async () => {
     if (!adminToken) return;
     try {
-      const response = await fetch(`/api/admin/refresh/status?token=${adminToken}`);
+      const response = await fetch("/api/admin/refresh/status", {
+        headers: { "X-Admin-Token": adminToken },
+      });
       if (response.ok) {
         const data = await response.json();
         setStatus(data);
@@ -54,7 +56,9 @@ export default function Admin() {
   const fetchLogs = async () => {
     if (!adminToken) return;
     try {
-      const response = await fetch(`/api/admin/refresh/logs?token=${adminToken}`);
+      const response = await fetch("/api/admin/refresh/logs", {
+        headers: { "X-Admin-Token": adminToken },
+      });
       if (response.ok) {
         const data = await response.json();
         setLogs(data.logs || []);
@@ -76,7 +80,9 @@ export default function Admin() {
     if (!adminToken) return;
     setIsLoading(true);
     try {
-      const response = await fetch(`/api/admin/refresh/trigger?token=${adminToken}`);
+      const response = await fetch("/api/admin/refresh/trigger", {
+        headers: { "X-Admin-Token": adminToken },
+      });
       const data = await response.json();
       if (response.ok) {
         toast({ title: "Refresh Started", description: "Database refresh has been triggered" });
