@@ -534,3 +534,58 @@ export interface ExecutiveSummary {
     highestRiskSupplier: string;
   };
 }
+
+// Saved Collections - User saved drill-down queries
+export const savedCollections = pgTable("saved_collections", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  name: text("name").notNull(),
+  description: text("description"),
+  insightType: text("insight_type").notNull(), // 'freight', 'aging', 'margin', 'orders', 'customers', 'products', 'returns'
+  queryConfig: text("query_config").notNull(), // JSON stringified filter/drill-down config
+  chartType: text("chart_type"), // 'bar', 'pie', 'line', 'table'
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertSavedCollectionSchema = createInsertSchema(savedCollections).omit({ 
+  id: true, 
+  createdAt: true, 
+  updatedAt: true 
+});
+export type InsertSavedCollection = z.infer<typeof insertSavedCollectionSchema>;
+export type SavedCollection = typeof savedCollections.$inferSelect;
+
+// AI Insight request/response types
+export interface AIInsightRequest {
+  context: 'executive_summary' | 'freight' | 'inventory' | 'margins' | 'orders' | 'customers' | 'products' | 'returns';
+  data: Record<string, any>;
+}
+
+export interface AIInsightResponse {
+  summary: string;
+  keyFindings: string[];
+  recommendations: string[];
+  risks: string[];
+  opportunities: string[];
+  generatedAt: string;
+}
+
+// PDF Report types
+export interface PDFReportRequest {
+  reportType: 'full_dashboard' | 'single_page';
+  pageName?: string;
+  includeCharts: boolean;
+  dateRange?: { start: string; end: string };
+}
+
+// Drill-down query configuration
+export interface DrillDownConfig {
+  dimension: string; // e.g., 'category', 'customer', 'vendor', 'make'
+  selectedValue?: string;
+  filters: Record<string, string | string[]>;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  limit?: number;
+  groupBy?: string;
+}
