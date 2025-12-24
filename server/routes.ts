@@ -2505,6 +2505,23 @@ Be specific with numbers and percentages when available. Prioritize actionable r
         return res.status(400).json({ error: "Name, insightType, and queryConfig are required" });
       }
 
+      // Validate insightType
+      const validInsightTypes = ['category', 'customer', 'vendor', 'product', 'monthly', 'status', 'make'];
+      if (!validInsightTypes.includes(insightType)) {
+        return res.status(400).json({ error: `Invalid insightType. Must be one of: ${validInsightTypes.join(', ')}` });
+      }
+
+      // Validate queryConfig structure
+      let parsedConfig: DrillDownConfig;
+      try {
+        parsedConfig = typeof queryConfig === 'string' ? JSON.parse(queryConfig) : queryConfig;
+        if (typeof parsedConfig !== 'object' || parsedConfig === null) {
+          throw new Error("Invalid queryConfig format");
+        }
+      } catch (e) {
+        return res.status(400).json({ error: "queryConfig must be a valid JSON object" });
+      }
+
       const result = await db.insert(savedCollections)
         .values({
           userId: user.id,

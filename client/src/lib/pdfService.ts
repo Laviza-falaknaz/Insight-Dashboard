@@ -43,6 +43,21 @@ export async function generateDashboardPDF(
   options: PDFExportOptions,
   contentElementIds: string[]
 ): Promise<void> {
+  // Validate inputs
+  if (!contentElementIds || contentElementIds.length === 0) {
+    throw new Error("No content elements specified for PDF export");
+  }
+
+  // Filter to only elements that exist in the DOM
+  const existingElements = contentElementIds.filter(id => {
+    const el = document.getElementById(id);
+    return el && el.offsetParent !== null; // Check element is visible
+  });
+
+  if (existingElements.length === 0) {
+    throw new Error("None of the specified elements are currently visible on the page");
+  }
+
   const pdf = new jsPDF({
     orientation: options.orientation || 'landscape',
     unit: 'mm',
@@ -79,10 +94,15 @@ export async function generateDashboardPDF(
   pdf.line(margin, yPosition, pageWidth - margin, yPosition);
   yPosition += 10;
 
-  // Capture and add each element
-  for (const elementId of contentElementIds) {
+  let elementsAdded = 0;
+
+  // Capture and add each element with defensive checks
+  for (const elementId of existingElements) {
     const element = document.getElementById(elementId);
     if (!element) continue;
+
+    // Wait a small amount to ensure render is complete
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     try {
       const canvas = await html2canvas(element, {
@@ -90,7 +110,16 @@ export async function generateDashboardPDF(
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff',
+        allowTaint: true,
+        windowWidth: element.scrollWidth,
+        windowHeight: element.scrollHeight,
       });
+
+      // Validate canvas
+      if (!canvas || canvas.width === 0 || canvas.height === 0) {
+        console.warn(`Skipping element ${elementId}: invalid canvas dimensions`);
+        continue;
+      }
 
       const imgData = canvas.toDataURL('image/png');
       const imgWidth = pageWidth - (margin * 2);
@@ -104,9 +133,16 @@ export async function generateDashboardPDF(
 
       pdf.addImage(imgData, 'PNG', margin, yPosition, imgWidth, imgHeight);
       yPosition += imgHeight + 10;
+      elementsAdded++;
     } catch (error) {
       console.error(`Error capturing element ${elementId}:`, error);
+      // Continue with other elements rather than failing entirely
     }
+  }
+
+  // Ensure at least one element was captured
+  if (elementsAdded === 0) {
+    throw new Error("Failed to capture any dashboard content for the PDF");
   }
 
   // Add footer to all pages
