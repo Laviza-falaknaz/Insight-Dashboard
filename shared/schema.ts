@@ -626,6 +626,52 @@ export interface DrillDownConfig {
 // Available entities for query building
 export type QueryEntity = 'inventory' | 'returns';
 
+// Join types supported (moved up for forward reference)
+export type JoinType = 'inner' | 'left' | 'right' | 'first' | 'exists';
+
+// Entity metadata definition for adaptive data sources
+export interface EntityDefinition {
+  id: QueryEntity;
+  name: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+}
+
+// Bidirectional relationship definition between entities
+export interface RelationshipDefinition {
+  id: string;
+  sourceEntity: QueryEntity;
+  targetEntity: QueryEntity;
+  sourceField: string;
+  targetField: string;
+  label?: string;
+  bidirectional: boolean;
+  defaultJoinType: JoinType;
+  supportedJoinTypes: JoinType[];
+}
+
+// Entity metadata registry
+export const entityDefinitions: EntityDefinition[] = [
+  { id: 'inventory', name: 'Inventory', description: 'Main inventory and sales data', icon: 'Package', color: '#3b82f6' },
+  { id: 'returns', name: 'Returns', description: 'Return and warranty claims', icon: 'RotateCcw', color: '#f59e0b' },
+];
+
+// Relationship definitions (bidirectional by default)
+export const relationshipDefinitions: RelationshipDefinition[] = [
+  {
+    id: 'inventory-returns',
+    sourceEntity: 'inventory',
+    targetEntity: 'returns',
+    sourceField: 'inventSerialId',
+    targetField: 'inventSerialId',
+    label: 'Serial Number',
+    bidirectional: true,
+    defaultJoinType: 'left',
+    supportedJoinTypes: ['inner', 'left', 'right', 'first', 'exists'],
+  },
+];
+
 // Column definition for query builder
 export interface QueryColumn {
   entity: QueryEntity;
@@ -678,9 +724,6 @@ export interface TopBottomFilter {
   count: number;
   byColumn: string;
 }
-
-// Join types supported
-export type JoinType = 'inner' | 'left' | 'right' | 'first' | 'exists';
 
 // Single field mapping condition
 export interface JoinCondition {
