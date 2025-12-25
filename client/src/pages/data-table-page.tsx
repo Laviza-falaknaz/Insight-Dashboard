@@ -95,6 +95,7 @@ interface PivotField extends QueryColumn {
   sortOrder?: 'asc' | 'desc' | 'none';
   aggregation?: AggregationType;
   filterValues?: string[];
+  filterOperator?: FilterOperator;
   topN?: number;
 }
 
@@ -103,16 +104,29 @@ function ValueFilterPopover({
   selectedValues, 
   onValuesChange,
   onTopNChange,
-  topN
+  topN,
+  operator = 'in',
+  onOperatorChange,
 }: { 
   field: PivotField; 
   selectedValues: string[];
   onValuesChange: (values: string[]) => void;
   onTopNChange?: (n: number | undefined) => void;
   topN?: number;
+  operator?: FilterOperator;
+  onOperatorChange?: (op: FilterOperator) => void;
 }) {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
+  const [customValue, setCustomValue] = useState(selectedValues[0] || "");
+  
+  const isCustomOperator = ['contains', 'starts_with', 'ends_with', 'not_equals', 'equals'].includes(operator);
+  
+  useEffect(() => {
+    if (isCustomOperator) {
+      setCustomValue(selectedValues[0] || "");
+    }
+  }, [operator, selectedValues, isCustomOperator]);
   
   const { data: valuesData, isLoading } = useQuery<ColumnValuesResponse>({
     queryKey: ["/api/query-builder/column-values", field.entity, field.field, search],
@@ -125,7 +139,7 @@ function ValueFilterPopover({
       });
       return response.json();
     },
-    enabled: open,
+    enabled: open && !isCustomOperator,
   });
 
   const toggleValue = (value: string) => {
@@ -144,6 +158,14 @@ function ValueFilterPopover({
 
   const clearAll = () => {
     onValuesChange([]);
+    setCustomValue("");
+  };
+
+  const applyCustom = () => {
+    if (customValue.trim()) {
+      onValuesChange([customValue.trim()]);
+      setOpen(false);
+    }
   };
 
   return (
@@ -151,68 +173,117 @@ function ValueFilterPopover({
       <PopoverTrigger asChild>
         <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" data-testid={`button-filter-${field.field}`}>
           <Filter className="h-3 w-3 mr-1" />
-          {selectedValues.length > 0 ? `${selectedValues.length} selected` : 'Filter'}
+          {selectedValues.length > 0 ? `${selectedValues.length}` : 'Filter'}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-0" align="start">
+      <PopoverContent className="w-80 p-0" align="start">
         <div className="p-3 border-b space-y-2">
-          <div className="relative">
-            <Search className="absolute left-2 top-2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search values..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 h-8"
-              data-testid={`input-filter-search-${field.field}`}
-            />
+          <div className="flex items-center gap-2">
+            <Label className="text-xs w-16">Match:</Label>
+            <Select 
+              value={operator} 
+              onValueChange={(v) => {
+                const newOp = v as FilterOperator;
+                const wasCustom = isCustomOperator;
+                const willBeCustom = ['contains', 'starts_with', 'ends_with', 'not_equals', 'equals'].includes(newOp);
+                onOperatorChange?.(newOp);
+                if (wasCustom !== willBeCustom) {
+                  onValuesChange([]);
+                  setCustomValue("");
+                }
+              }}
+            >
+              <SelectTrigger className="h-7 text-xs flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="in">Is one of (select below)</SelectItem>
+                <SelectItem value="equals">Equals (type value)</SelectItem>
+                <SelectItem value="not_equals">Not equals</SelectItem>
+                <SelectItem value="contains">Contains text</SelectItem>
+                <SelectItem value="starts_with">Starts with</SelectItem>
+                <SelectItem value="ends_with">Ends with</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="h-6 text-xs flex-1" onClick={selectAll}>
-              Select All
-            </Button>
-            <Button variant="outline" size="sm" className="h-6 text-xs flex-1" onClick={clearAll}>
-              Clear
-            </Button>
-          </div>
-          {onTopNChange && (
-            <div className="flex items-center gap-2">
-              <Label className="text-xs">Top N:</Label>
+          
+          {isCustomOperator ? (
+            <div className="space-y-2">
               <Input
-                type="number"
-                placeholder="All"
-                value={topN || ''}
-                onChange={(e) => onTopNChange(e.target.value ? parseInt(e.target.value) : undefined)}
-                className="h-6 w-16 text-xs"
-                min={1}
-                max={100}
+                placeholder="Enter value..."
+                value={customValue}
+                onChange={(e) => setCustomValue(e.target.value)}
+                className="h-8 text-xs"
+                data-testid={`input-custom-filter-${field.field}`}
               />
+              <div className="flex gap-2">
+                <Button size="sm" className="h-7 text-xs flex-1" onClick={applyCustom}>Apply</Button>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={clearAll}>Clear</Button>
+              </div>
             </div>
+          ) : (
+            <>
+              <div className="relative">
+                <Search className="absolute left-2 top-2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search values..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-8 h-8"
+                  data-testid={`input-filter-search-${field.field}`}
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="h-6 text-xs flex-1" onClick={selectAll}>
+                  All
+                </Button>
+                <Button variant="outline" size="sm" className="h-6 text-xs flex-1" onClick={clearAll}>
+                  Clear
+                </Button>
+              </div>
+              {onTopNChange && (
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs">Limit:</Label>
+                  <Input
+                    type="number"
+                    placeholder="All"
+                    value={topN || ''}
+                    onChange={(e) => onTopNChange(e.target.value ? parseInt(e.target.value) : undefined)}
+                    className="h-6 w-16 text-xs"
+                    min={1}
+                    max={100}
+                  />
+                </div>
+              )}
+            </>
           )}
         </div>
-        <ScrollArea className="h-48">
-          <div className="p-2 space-y-1">
-            {isLoading ? (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="h-4 w-4 animate-spin" />
-              </div>
-            ) : valuesData?.values?.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-4">No values found</p>
-            ) : (
-              [...(valuesData?.values || [])].sort((a, b) => a.value.localeCompare(b.value)).map((item) => (
-                <div
-                  key={item.value}
-                  className="flex items-center gap-2 px-2 py-1 rounded hover-elevate cursor-pointer"
-                  onClick={() => toggleValue(item.value)}
-                  data-testid={`checkbox-filter-value-${item.value}`}
-                >
-                  <Checkbox checked={selectedValues.includes(item.value)} />
-                  <span className="flex-1 text-xs truncate">{item.value}</span>
-                  <Badge variant="secondary" className="text-[10px]">{item.count}</Badge>
+        {!isCustomOperator && (
+          <ScrollArea className="h-48">
+            <div className="p-2 space-y-1">
+              {isLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 </div>
-              ))
-            )}
-          </div>
-        </ScrollArea>
+              ) : valuesData?.values?.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-4">No values found</p>
+              ) : (
+                [...(valuesData?.values || [])].sort((a, b) => a.value.localeCompare(b.value)).map((item) => (
+                  <div
+                    key={item.value}
+                    className="flex items-center gap-2 px-2 py-1 rounded hover-elevate cursor-pointer"
+                    onClick={() => toggleValue(item.value)}
+                    data-testid={`checkbox-filter-value-${item.value}`}
+                  >
+                    <Checkbox checked={selectedValues.includes(item.value)} />
+                    <span className="flex-1 text-xs truncate">{item.value}</span>
+                    <Badge variant="secondary" className="text-[10px]">{item.count}</Badge>
+                  </div>
+                ))
+              )}
+            </div>
+          </ScrollArea>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -309,6 +380,7 @@ function FieldPill({
   onSortChange,
   onAggregationChange,
   onFilterChange,
+  onFilterOperatorChange,
   onTopNChange,
   showAggregation = false,
   showSort = true,
@@ -319,6 +391,7 @@ function FieldPill({
   onSortChange?: (sort: 'asc' | 'desc' | 'none') => void;
   onAggregationChange?: (agg: AggregationType) => void;
   onFilterChange?: (values: string[]) => void;
+  onFilterOperatorChange?: (op: FilterOperator) => void;
   onTopNChange?: (n: number | undefined) => void;
   showAggregation?: boolean;
   showSort?: boolean;
@@ -369,6 +442,8 @@ function FieldPill({
           onValuesChange={onFilterChange}
           onTopNChange={onTopNChange}
           topN={field.topN}
+          operator={field.filterOperator || 'in'}
+          onOperatorChange={onFilterOperatorChange}
         />
       )}
       
@@ -721,7 +796,7 @@ export default function DataTablePage() {
         filters.push({
           id: generateId(),
           column: { entity: f.entity, field: f.field, label: f.label, type: f.type, aggregatable: f.aggregatable },
-          operator: 'in',
+          operator: f.filterOperator || 'in',
           value: f.filterValues.join(','),
         });
       }
@@ -957,7 +1032,8 @@ export default function DataTablePage() {
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Rows3 className="h-4 w-4" />
-                  <Label className="text-xs font-medium">Primary Grouping</Label>
+                  <Label className="text-xs font-medium">Rows</Label>
+                  <span className="text-[10px] text-muted-foreground">(Group by)</span>
                 </div>
                 <div 
                   className={`min-h-[80px] p-2 border rounded-md space-y-1 transition-colors ${
@@ -987,6 +1063,7 @@ export default function DataTablePage() {
                         onRemove={() => removeRowField(field.id)}
                         onSortChange={(sort) => updateRowField(field.id, { sortOrder: sort })}
                         onFilterChange={(values) => updateRowField(field.id, { filterValues: values })}
+                        onFilterOperatorChange={(op) => updateRowField(field.id, { filterOperator: op })}
                         onTopNChange={(n) => updateRowField(field.id, { topN: n })}
                         showAggregation={false}
                       />
@@ -998,7 +1075,8 @@ export default function DataTablePage() {
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Columns className="h-4 w-4" />
-                  <Label className="text-xs font-medium">Secondary Grouping</Label>
+                  <Label className="text-xs font-medium">Columns</Label>
+                  <span className="text-[10px] text-muted-foreground">(Split by)</span>
                 </div>
                 <div 
                   className={`min-h-[80px] p-2 border rounded-md space-y-1 transition-colors ${
@@ -1028,6 +1106,7 @@ export default function DataTablePage() {
                         onRemove={() => removeColumnField(field.id)}
                         onSortChange={(sort) => updateColumnField(field.id, { sortOrder: sort })}
                         onFilterChange={(values) => updateColumnField(field.id, { filterValues: values })}
+                        onFilterOperatorChange={(op) => updateColumnField(field.id, { filterOperator: op })}
                         showAggregation={false}
                       />
                     ))
@@ -1039,6 +1118,7 @@ export default function DataTablePage() {
                 <div className="flex items-center gap-2">
                   <Hash className="h-4 w-4" />
                   <Label className="text-xs font-medium">Values</Label>
+                  <span className="text-[10px] text-muted-foreground">(Sum/Count)</span>
                 </div>
                 <div 
                   className={`min-h-[80px] p-2 border rounded-md space-y-1 transition-colors ${
@@ -1084,6 +1164,7 @@ export default function DataTablePage() {
                 <div className="flex items-center gap-2">
                   <Filter className="h-4 w-4" />
                   <Label className="text-xs font-medium">Filters</Label>
+                  <span className="text-[10px] text-muted-foreground">(Limit data)</span>
                 </div>
                 <div 
                   className={`min-h-[80px] p-2 border rounded-md space-y-1 transition-colors ${
@@ -1112,6 +1193,7 @@ export default function DataTablePage() {
                         field={field}
                         onRemove={() => removeGlobalFilter(field.id)}
                         onFilterChange={(values) => updateGlobalFilter(field.id, { filterValues: values })}
+                        onFilterOperatorChange={(op) => updateGlobalFilter(field.id, { filterOperator: op })}
                         showSort={false}
                         showAggregation={false}
                       />
