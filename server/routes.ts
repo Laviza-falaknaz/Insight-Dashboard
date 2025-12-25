@@ -4081,6 +4081,64 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       const config = req.body as QueryBuilderConfig;
       const startTime = Date.now();
       
+      // Detect which entities are actually referenced in the query
+      const referencedEntities = new Set<string>();
+      
+      // Check dimensions
+      for (const dim of config.dimensions) {
+        referencedEntities.add(dim.column.entity);
+      }
+      
+      // Check column dimensions
+      for (const dim of config.columnDimensions || []) {
+        referencedEntities.add(dim.column.entity);
+      }
+      
+      // Check measures
+      for (const measure of config.measures) {
+        referencedEntities.add(measure.column.entity);
+      }
+      
+      // Check filters
+      for (const filter of config.filters) {
+        referencedEntities.add(filter.column.entity);
+      }
+      
+      // Check sorts (sorts use columnId which references dimensions/measures by alias)
+      // Sorts don't directly reference entities, they reference dimension/measure aliases
+      
+      // Validate: if returns is referenced, we need a valid join that actually creates the alias
+      const returnsReferenced = referencedEntities.has('returns');
+      const hasRelationship = config.relationships.length > 0;
+      const rel = hasRelationship ? config.relationships[0] : null;
+      const hasValidConditions = rel && rel.enabled && 
+        (rel.conditions || []).some((c: any) => c.leftField && c.rightField);
+      const joinType = rel?.joinType;
+      
+      // Join types that create the 'r' alias: inner, left, right, first
+      // Join types that do NOT create alias: exists, none
+      const aliasCreatingTypes = ['inner', 'left', 'right', 'first'];
+      const joinsCreatesAlias = hasValidConditions && aliasCreatingTypes.includes(joinType || '');
+      
+      if (returnsReferenced && !joinsCreatesAlias) {
+        if (joinType === 'exists') {
+          return res.status(400).json({ 
+            error: "The 'Exists' join type cannot be used when selecting Returns columns. Use 'Inner', 'Left', 'Right', or 'First Match' join instead.",
+            code: "EXISTS_JOIN_INVALID"
+          });
+        }
+        if (!joinType || (joinType as string) === 'none') {
+          return res.status(400).json({ 
+            error: "Returns columns require a join. Please select a join type and configure field mappings.",
+            code: "NO_JOIN_TYPE"
+          });
+        }
+        return res.status(400).json({ 
+          error: "Returns columns require a configured join. Please set up join conditions in the Join Builder section.",
+          code: "MISSING_JOIN"
+        });
+      }
+      
       // Build dynamic SQL query
       const selectParts: string[] = [];
       const groupByParts: string[] = [];

@@ -844,9 +844,17 @@ export default function DataTablePage() {
     }
   };
 
+  // Auto-enable entity when its column is used
+  const ensureEntityEnabled = (entity: QueryEntity) => {
+    if (!selectedEntities.includes(entity)) {
+      setSelectedEntities(prev => [...prev, entity]);
+    }
+  };
+
   const addToRows = (col: QueryColumn) => {
     const exists = rowFields.some(f => f.entity === col.entity && f.field === col.field);
     if (!exists) {
+      ensureEntityEnabled(col.entity);
       setRowFields([...rowFields, { ...col, id: generateId(), sortOrder: 'none' }]);
     }
   };
@@ -854,11 +862,13 @@ export default function DataTablePage() {
   const addToColumns = (col: QueryColumn) => {
     const exists = columnFields.some(f => f.entity === col.entity && f.field === col.field);
     if (!exists) {
+      ensureEntityEnabled(col.entity);
       setColumnFields([...columnFields, { ...col, id: generateId(), sortOrder: 'none' }]);
     }
   };
 
   const addToValues = (col: QueryColumn) => {
+    ensureEntityEnabled(col.entity);
     const defaultAgg = col.type === 'numeric' ? 'SUM' : 'COUNT_DISTINCT';
     const newField: PivotField = { ...col, id: generateId(), aggregation: defaultAgg };
     setValueFields([...valueFields, newField]);
@@ -867,6 +877,7 @@ export default function DataTablePage() {
   const addToFilters = (col: QueryColumn) => {
     const exists = globalFilters.some(f => f.entity === col.entity && f.field === col.field);
     if (!exists) {
+      ensureEntityEnabled(col.entity);
       setGlobalFilters([...globalFilters, { ...col, id: generateId(), filterValues: [] }]);
     }
   };
@@ -887,10 +898,63 @@ export default function DataTablePage() {
     setGlobalFilters(globalFilters.map(f => f.id === id ? { ...f, ...updates } : f));
   };
 
-  const removeRowField = (id: string) => setRowFields(rowFields.filter(f => f.id !== id));
-  const removeColumnField = (id: string) => setColumnFields(columnFields.filter(f => f.id !== id));
-  const removeValueField = (id: string) => setValueFields(valueFields.filter(f => f.id !== id));
-  const removeGlobalFilter = (id: string) => setGlobalFilters(globalFilters.filter(f => f.id !== id));
+  // Check if any fields reference an entity
+  const isEntityUsed = (entity: QueryEntity): boolean => {
+    return rowFields.some(f => f.entity === entity) ||
+           columnFields.some(f => f.entity === entity) ||
+           valueFields.some(f => f.entity === entity) ||
+           globalFilters.some(f => f.entity === entity);
+  };
+
+  // Auto-disable entity when no columns reference it (except inventory which is always required)
+  const checkAndDisableEntity = (entity: QueryEntity, newFields: { row: PivotField[], col: PivotField[], val: PivotField[], filter: PivotField[] }) => {
+    if (entity === 'inventory') return; // Always keep inventory
+    const stillUsed = 
+      newFields.row.some(f => f.entity === entity) ||
+      newFields.col.some(f => f.entity === entity) ||
+      newFields.val.some(f => f.entity === entity) ||
+      newFields.filter.some(f => f.entity === entity);
+    
+    if (!stillUsed && selectedEntities.includes(entity)) {
+      setSelectedEntities(prev => prev.filter(e => e !== entity));
+    }
+  };
+
+  const removeRowField = (id: string) => {
+    const fieldToRemove = rowFields.find(f => f.id === id);
+    const newRowFields = rowFields.filter(f => f.id !== id);
+    setRowFields(newRowFields);
+    if (fieldToRemove) {
+      setTimeout(() => checkAndDisableEntity(fieldToRemove.entity, { row: newRowFields, col: columnFields, val: valueFields, filter: globalFilters }), 0);
+    }
+  };
+  
+  const removeColumnField = (id: string) => {
+    const fieldToRemove = columnFields.find(f => f.id === id);
+    const newColFields = columnFields.filter(f => f.id !== id);
+    setColumnFields(newColFields);
+    if (fieldToRemove) {
+      setTimeout(() => checkAndDisableEntity(fieldToRemove.entity, { row: rowFields, col: newColFields, val: valueFields, filter: globalFilters }), 0);
+    }
+  };
+  
+  const removeValueField = (id: string) => {
+    const fieldToRemove = valueFields.find(f => f.id === id);
+    const newValFields = valueFields.filter(f => f.id !== id);
+    setValueFields(newValFields);
+    if (fieldToRemove) {
+      setTimeout(() => checkAndDisableEntity(fieldToRemove.entity, { row: rowFields, col: columnFields, val: newValFields, filter: globalFilters }), 0);
+    }
+  };
+  
+  const removeGlobalFilter = (id: string) => {
+    const fieldToRemove = globalFilters.find(f => f.id === id);
+    const newFilters = globalFilters.filter(f => f.id !== id);
+    setGlobalFilters(newFilters);
+    if (fieldToRemove) {
+      setTimeout(() => checkAndDisableEntity(fieldToRemove.entity, { row: rowFields, col: columnFields, val: valueFields, filter: newFilters }), 0);
+    }
+  };
 
   const buildConfig = (): QueryBuilderConfig => {
     const dimensions: QueryDimension[] = rowFields.map(f => ({
