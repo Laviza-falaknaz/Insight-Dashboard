@@ -76,12 +76,26 @@ function HeroKPI({ title, value, subValue, icon, trend, isLoading, accent }: {
   isLoading?: boolean;
   accent?: 'default' | 'success' | 'warning' | 'danger';
 }) {
-  const accentColors = {
-    default: 'from-primary/10 to-primary/5 border-primary/20',
-    success: 'from-emerald-500/10 to-emerald-500/5 border-emerald-500/20',
-    warning: 'from-amber-500/10 to-amber-500/5 border-amber-500/20',
-    danger: 'from-red-500/10 to-red-500/5 border-red-500/20',
+  const accentStyles = {
+    default: {
+      gradient: 'from-primary/10 to-primary/5 border-primary/20',
+      icon: 'text-primary',
+    },
+    success: {
+      gradient: 'from-[hsl(var(--chart-2))]/10 to-[hsl(var(--chart-2))]/5 border-[hsl(var(--chart-2))]/20',
+      icon: 'text-[hsl(var(--chart-2))]',
+    },
+    warning: {
+      gradient: 'from-[hsl(var(--chart-4))]/10 to-[hsl(var(--chart-4))]/5 border-[hsl(var(--chart-4))]/20',
+      icon: 'text-[hsl(var(--chart-4))]',
+    },
+    danger: {
+      gradient: 'from-destructive/10 to-destructive/5 border-destructive/20',
+      icon: 'text-destructive',
+    },
   };
+
+  const currentAccent = accentStyles[accent || 'default'];
 
   if (isLoading) {
     return (
@@ -96,7 +110,7 @@ function HeroKPI({ title, value, subValue, icon, trend, isLoading, accent }: {
   }
 
   return (
-    <Card className={`relative overflow-hidden bg-gradient-to-br ${accentColors[accent || 'default']} border`}>
+    <Card className={`relative overflow-hidden bg-gradient-to-br ${currentAccent.gradient} border`}>
       <CardContent className="p-5">
         <div className="flex items-start justify-between">
           <div className="flex-1">
@@ -106,18 +120,18 @@ function HeroKPI({ title, value, subValue, icon, trend, isLoading, accent }: {
             {trend && (
               <div className="flex items-center gap-1 mt-2">
                 {trend.value >= 0 ? (
-                  <ArrowUpRight className="h-3 w-3 text-emerald-500" />
+                  <ArrowUpRight className="h-3 w-3 text-[hsl(var(--chart-2))]" />
                 ) : (
-                  <ArrowDownRight className="h-3 w-3 text-red-500" />
+                  <ArrowDownRight className="h-3 w-3 text-destructive" />
                 )}
-                <span className={`text-xs font-medium ${trend.value >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                <span className={`text-xs font-medium ${trend.value >= 0 ? 'text-[hsl(var(--chart-2))]' : 'text-destructive'}`}>
                   {formatPercent(Math.abs(trend.value))}
                 </span>
                 <span className="text-xs text-muted-foreground">{trend.label}</span>
               </div>
             )}
           </div>
-          <div className="p-2 rounded-lg bg-background/50">
+          <div className={`p-2 rounded-lg bg-background/50 ${currentAccent.icon}`}>
             {icon}
           </div>
         </div>
@@ -289,7 +303,7 @@ export default function CommandCenter() {
             title="Net Revenue"
             value={formatCurrency(strategicData?.salesRevenue || 0)}
             subValue={`${strategicData?.unitsSold?.toLocaleString() || 0} units`}
-            icon={<DollarSign className="h-5 w-5 text-primary" />}
+            icon={<DollarSign className="h-5 w-5" />}
             isLoading={isLoading}
             accent="default"
           />
@@ -297,7 +311,7 @@ export default function CommandCenter() {
             title="Gross Profit"
             value={formatCurrency(strategicData?.grossProfit || 0)}
             subValue={`${formatPercent(strategicData?.grossMargin || 0)} margin`}
-            icon={<TrendingUp className="h-5 w-5 text-emerald-500" />}
+            icon={<TrendingUp className="h-5 w-5" />}
             isLoading={isLoading}
             accent="success"
           />
@@ -305,7 +319,7 @@ export default function CommandCenter() {
             title="Net Profit"
             value={formatCurrency(strategicData?.netProfit || 0)}
             subValue={`After ${formatCurrency(Math.abs(strategicData?.returnImpact || 0))} returns`}
-            icon={<Target className="h-5 w-5 text-primary" />}
+            icon={<Target className="h-5 w-5" />}
             isLoading={isLoading}
             accent={strategicData?.netMargin && strategicData.netMargin > 30 ? 'success' : 'warning'}
           />
@@ -313,16 +327,17 @@ export default function CommandCenter() {
             title="Return Rate"
             value={formatPercent(strategicData?.returnRate || 0)}
             subValue={`${strategicData?.unitsReturned || 0} units returned`}
-            icon={<RotateCcw className="h-5 w-5 text-amber-500" />}
+            icon={<RotateCcw className="h-5 w-5" />}
             isLoading={isLoading}
-            accent={(strategicData?.returnRate || 0) > 5 ? 'danger' : 'default'}
+            accent={(strategicData?.returnRate || 0) > 5 ? 'danger' : 'warning'}
           />
           <HeroKPI
             title="Active Customers"
             value={(strategicData?.uniqueCustomers || 0).toLocaleString()}
             subValue={`${strategicData?.uniqueProducts || 0} products`}
-            icon={<Users className="h-5 w-5 text-blue-500" />}
+            icon={<Users className="h-5 w-5" />}
             isLoading={isLoading}
+            accent="default"
           />
         </div>
 
