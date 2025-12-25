@@ -334,7 +334,6 @@ export default function DataTablePage() {
       label,
       type: type as 'text' | 'numeric' | 'date',
       aggregatable: type === 'numeric',
-      filterable: true,
     });
 
     return {
@@ -694,27 +693,25 @@ export default function DataTablePage() {
                   {/* Selected columns with aggregation */}
                   {selectedColumns.length > 0 && (
                     <div className="space-y-1 p-2 bg-muted/50 rounded-md">
-                      <Label className="text-xs text-muted-foreground">Selected ({selectedColumns.length})</Label>
+                      <Label className="text-xs text-muted-foreground">Selected Columns ({selectedColumns.length})</Label>
                       {selectedColumns.map(col => (
                         <div key={col.id} className="flex items-center gap-1 text-xs bg-background p-1.5 rounded">
                           {getFieldIcon(col.type)}
-                          <span className="flex-1 truncate">{col.field}</span>
-                          {col.type === 'numeric' && (
-                            <Select 
-                              value={col.aggregation || 'none'} 
-                              onValueChange={(v) => updateColumnAggregation(col.id, v === 'none' ? undefined : v as AggregationType)}
-                            >
-                              <SelectTrigger className="h-5 w-20 text-[10px]">
-                                <SelectValue placeholder="Agg" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none" className="text-xs">No Agg</SelectItem>
-                                {AGGREGATIONS.map(a => (
-                                  <SelectItem key={a.value} value={a.value} className="text-xs">{a.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
+                          <span className="flex-1 truncate text-[11px]" title={col.field}>{col.field}</span>
+                          <Select 
+                            value={col.aggregation || 'none'} 
+                            onValueChange={(v) => updateColumnAggregation(col.id, v === 'none' ? undefined : v as AggregationType)}
+                          >
+                            <SelectTrigger className="h-6 w-24 text-[10px]" data-testid={`select-agg-${col.field}`}>
+                              <SelectValue placeholder="Aggregate" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none" className="text-xs">Group By</SelectItem>
+                              {AGGREGATIONS.map(a => (
+                                <SelectItem key={a.value} value={a.value} className="text-xs">{a.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                           <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => setSelectedColumns(selectedColumns.filter(c => c.id !== col.id))}>
                             <X className="h-3 w-3" />
                           </Button>
