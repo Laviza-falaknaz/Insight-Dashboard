@@ -49,16 +49,75 @@ const AGGREGATIONS: { value: AggregationType; label: string }[] = [
   { value: 'MAX', label: 'Maximum' },
 ];
 
-const FILTER_OPERATORS: { value: FilterOperator; label: string; types: string[] }[] = [
+const FILTER_OPERATORS: { value: FilterOperator; label: string; types: string[]; needsValue?: boolean; needsSecondValue?: boolean }[] = [
   { value: 'equals', label: '=', types: ['text', 'numeric', 'date'] },
   { value: 'not_equals', label: '!=', types: ['text', 'numeric', 'date'] },
   { value: 'greater_than', label: '>', types: ['numeric', 'date'] },
   { value: 'less_than', label: '<', types: ['numeric', 'date'] },
+  { value: 'greater_equal', label: '>=', types: ['numeric', 'date'] },
+  { value: 'less_equal', label: '<=', types: ['numeric', 'date'] },
+  { value: 'between', label: 'Between', types: ['numeric', 'date'], needsSecondValue: true },
   { value: 'contains', label: 'Contains', types: ['text'] },
   { value: 'starts_with', label: 'Starts With', types: ['text'] },
-  { value: 'in', label: 'In List', types: ['text'] },
-  { value: 'is_null', label: 'Is Empty', types: ['text', 'numeric', 'date'] },
-  { value: 'is_not_null', label: 'Is Not Empty', types: ['text', 'numeric', 'date'] },
+  { value: 'ends_with', label: 'Ends With', types: ['text'] },
+  { value: 'in', label: 'In List', types: ['text', 'numeric'] },
+  { value: 'not_in', label: 'Not In List', types: ['text', 'numeric'] },
+  { value: 'is_null', label: 'Is Empty', types: ['text', 'numeric', 'date'], needsValue: false },
+  { value: 'is_not_null', label: 'Is Not Empty', types: ['text', 'numeric', 'date'], needsValue: false },
+];
+
+const DATE_PRESETS: { value: string; label: string; getRange: () => { start: string; end?: string } }[] = [
+  { value: 'today', label: 'Today', getRange: () => {
+    const today = new Date();
+    return { start: today.toISOString().split('T')[0] };
+  }},
+  { value: 'yesterday', label: 'Yesterday', getRange: () => {
+    const d = new Date(); d.setDate(d.getDate() - 1);
+    return { start: d.toISOString().split('T')[0] };
+  }},
+  { value: 'this_week', label: 'This Week', getRange: () => {
+    const today = new Date();
+    const day = today.getDay();
+    const start = new Date(today); start.setDate(today.getDate() - day);
+    return { start: start.toISOString().split('T')[0], end: today.toISOString().split('T')[0] };
+  }},
+  { value: 'last_7_days', label: 'Last 7 Days', getRange: () => {
+    const today = new Date();
+    const start = new Date(today); start.setDate(today.getDate() - 7);
+    return { start: start.toISOString().split('T')[0], end: today.toISOString().split('T')[0] };
+  }},
+  { value: 'last_30_days', label: 'Last 30 Days', getRange: () => {
+    const today = new Date();
+    const start = new Date(today); start.setDate(today.getDate() - 30);
+    return { start: start.toISOString().split('T')[0], end: today.toISOString().split('T')[0] };
+  }},
+  { value: 'this_month', label: 'This Month', getRange: () => {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { start: start.toISOString().split('T')[0], end: today.toISOString().split('T')[0] };
+  }},
+  { value: 'last_month', label: 'Last Month', getRange: () => {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const end = new Date(today.getFullYear(), today.getMonth(), 0);
+    return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+  }},
+  { value: 'this_quarter', label: 'This Quarter', getRange: () => {
+    const today = new Date();
+    const quarter = Math.floor(today.getMonth() / 3);
+    const start = new Date(today.getFullYear(), quarter * 3, 1);
+    return { start: start.toISOString().split('T')[0], end: today.toISOString().split('T')[0] };
+  }},
+  { value: 'this_year', label: 'This Year', getRange: () => {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), 0, 1);
+    return { start: start.toISOString().split('T')[0], end: today.toISOString().split('T')[0] };
+  }},
+  { value: 'last_90_days', label: 'Last 90 Days', getRange: () => {
+    const today = new Date();
+    const start = new Date(today); start.setDate(today.getDate() - 90);
+    return { start: start.toISOString().split('T')[0], end: today.toISOString().split('T')[0] };
+  }},
 ];
 
 const JOIN_TYPES: { value: JoinType; label: string; description: string }[] = [
@@ -98,6 +157,8 @@ interface QueryFilterItem {
   type: string;
   operator: FilterOperator;
   value: string;
+  value2?: string;
+  datePreset?: string;
 }
 
 interface OrderByItem {
@@ -366,7 +427,7 @@ export default function DataTablePage() {
         id: f.id,
         column: getColumnObject(f.entity, f.field, f.label, f.type),
         operator: f.operator,
-        value: f.value,
+        value: f.operator === 'between' && f.value2 ? [f.value, f.value2] : f.value,
       })),
       sorts: orderBy.map(o => ({
         columnId: o.field,
@@ -924,9 +985,17 @@ export default function DataTablePage() {
                           <X className="h-3 w-3" />
                         </Button>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Select value={filter.operator} onValueChange={(v) => updateFilter(filter.id, { operator: v as FilterOperator })}>
-                          <SelectTrigger className="h-7 text-xs w-24">
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <Select value={filter.operator} onValueChange={(v) => {
+                          const updates: Partial<QueryFilterItem> = { operator: v as FilterOperator };
+                          if (['is_null', 'is_not_null'].includes(v)) {
+                            updates.value = '';
+                            updates.value2 = undefined;
+                            updates.datePreset = undefined;
+                          }
+                          updateFilter(filter.id, updates);
+                        }}>
+                          <SelectTrigger className="h-7 text-xs w-28">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -936,12 +1005,73 @@ export default function DataTablePage() {
                           </SelectContent>
                         </Select>
                         {!['is_null', 'is_not_null'].includes(filter.operator) && (
-                          <Input 
-                            value={filter.value}
-                            onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
-                            placeholder="Value"
-                            className="h-7 text-xs flex-1"
-                          />
+                          <>
+                            {filter.type === 'date' && (
+                              <Select 
+                                value={filter.datePreset || 'custom'} 
+                                onValueChange={(v) => {
+                                  if (v === 'custom') {
+                                    updateFilter(filter.id, { datePreset: undefined });
+                                  } else {
+                                    const preset = DATE_PRESETS.find(p => p.value === v);
+                                    if (preset) {
+                                      const range = preset.getRange();
+                                      updateFilter(filter.id, { 
+                                        datePreset: v, 
+                                        value: range.start,
+                                        value2: range.end,
+                                        operator: range.end ? 'between' : 'equals'
+                                      });
+                                    }
+                                  }
+                                }}
+                              >
+                                <SelectTrigger className="h-7 text-xs w-28">
+                                  <SelectValue placeholder="Preset..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="custom" className="text-xs">Custom Date</SelectItem>
+                                  {DATE_PRESETS.map(p => (
+                                    <SelectItem key={p.value} value={p.value} className="text-xs">{p.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                            {filter.operator === 'between' ? (
+                              <div className="flex items-center gap-1 flex-1">
+                                <Input 
+                                  type={filter.type === 'date' ? 'date' : filter.type === 'numeric' ? 'number' : 'text'}
+                                  value={filter.value}
+                                  onChange={(e) => updateFilter(filter.id, { value: e.target.value, datePreset: undefined })}
+                                  placeholder="From"
+                                  className="h-7 text-xs flex-1"
+                                />
+                                <span className="text-xs text-muted-foreground">to</span>
+                                <Input 
+                                  type={filter.type === 'date' ? 'date' : filter.type === 'numeric' ? 'number' : 'text'}
+                                  value={filter.value2 || ''}
+                                  onChange={(e) => updateFilter(filter.id, { value2: e.target.value, datePreset: undefined })}
+                                  placeholder="To"
+                                  className="h-7 text-xs flex-1"
+                                />
+                              </div>
+                            ) : ['in', 'not_in'].includes(filter.operator) ? (
+                              <Input 
+                                value={filter.value}
+                                onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
+                                placeholder="value1, value2, value3..."
+                                className="h-7 text-xs flex-1"
+                              />
+                            ) : (
+                              <Input 
+                                type={filter.type === 'date' ? 'date' : filter.type === 'numeric' ? 'number' : 'text'}
+                                value={filter.value}
+                                onChange={(e) => updateFilter(filter.id, { value: e.target.value, datePreset: undefined })}
+                                placeholder={filter.type === 'text' && ['contains', 'starts_with', 'ends_with'].includes(filter.operator) ? 'Pattern...' : 'Value'}
+                                className="h-7 text-xs flex-1"
+                              />
+                            )}
+                          </>
                         )}
                       </div>
                     </div>

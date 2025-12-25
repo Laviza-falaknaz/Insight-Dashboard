@@ -4580,24 +4580,65 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       
       for (const filter of config.filters) {
         const colRef = fieldToColumn(filter.column.entity, filter.column.field);
+        const escapeValue = (v: string | number) => String(v).replace(/'/g, "''");
+        const isDateColumn = filter.column.type === 'date';
+        const isNumericColumn = filter.column.type === 'numeric';
+        
         switch (filter.operator) {
           case 'equals':
-            whereConditions.push(`${colRef} = '${filter.value}'`);
+            whereConditions.push(`${colRef} = '${escapeValue(filter.value)}'`);
             break;
           case 'not_equals':
-            whereConditions.push(`${colRef} != '${filter.value}'`);
+            whereConditions.push(`${colRef} != '${escapeValue(filter.value)}'`);
             break;
           case 'contains':
-            whereConditions.push(`${colRef} ILIKE '%${filter.value}%'`);
+            whereConditions.push(`${colRef} ILIKE '%${escapeValue(filter.value)}%'`);
             break;
           case 'starts_with':
-            whereConditions.push(`${colRef} ILIKE '${filter.value}%'`);
+            whereConditions.push(`${colRef} ILIKE '${escapeValue(filter.value)}%'`);
+            break;
+          case 'ends_with':
+            whereConditions.push(`${colRef} ILIKE '%${escapeValue(filter.value)}'`);
             break;
           case 'greater_than':
-            whereConditions.push(`CAST(${colRef} AS numeric) > ${filter.value}`);
+            if (isDateColumn) {
+              whereConditions.push(`${colRef}::date > '${escapeValue(filter.value)}'::date`);
+            } else {
+              whereConditions.push(`CAST(${colRef} AS numeric) > ${filter.value}`);
+            }
             break;
           case 'less_than':
-            whereConditions.push(`CAST(${colRef} AS numeric) < ${filter.value}`);
+            if (isDateColumn) {
+              whereConditions.push(`${colRef}::date < '${escapeValue(filter.value)}'::date`);
+            } else {
+              whereConditions.push(`CAST(${colRef} AS numeric) < ${filter.value}`);
+            }
+            break;
+          case 'greater_equal':
+            if (isDateColumn) {
+              whereConditions.push(`${colRef}::date >= '${escapeValue(filter.value)}'::date`);
+            } else {
+              whereConditions.push(`CAST(${colRef} AS numeric) >= ${filter.value}`);
+            }
+            break;
+          case 'less_equal':
+            if (isDateColumn) {
+              whereConditions.push(`${colRef}::date <= '${escapeValue(filter.value)}'::date`);
+            } else {
+              whereConditions.push(`CAST(${colRef} AS numeric) <= ${filter.value}`);
+            }
+            break;
+          case 'between':
+            if (Array.isArray(filter.value) && filter.value.length >= 2) {
+              const [v1, v2] = filter.value;
+              if (isDateColumn) {
+                whereConditions.push(`${colRef}::date BETWEEN '${escapeValue(v1)}'::date AND '${escapeValue(v2)}'::date`);
+              } else if (isNumericColumn) {
+                whereConditions.push(`CAST(${colRef} AS numeric) BETWEEN ${v1} AND ${v2}`);
+              } else {
+                whereConditions.push(`${colRef} BETWEEN '${escapeValue(v1)}' AND '${escapeValue(v2)}'`);
+              }
+            }
             break;
           case 'is_null':
             whereConditions.push(`${colRef} IS NULL`);
@@ -4613,8 +4654,20 @@ Be specific with numbers and percentages when available. Prioritize actionable r
               inValues = filter.value.split(',').map(v => v.trim()).filter(v => v);
             }
             if (inValues.length > 0) {
-              const vals = inValues.map(v => `'${v.replace(/'/g, "''").toUpperCase()}'`).join(',');
+              const vals = inValues.map(v => `'${escapeValue(v).toUpperCase()}'`).join(',');
               whereConditions.push(`UPPER(${colRef}::text) IN (${vals})`);
+            }
+            break;
+          case 'not_in':
+            let notInValues: string[] = [];
+            if (Array.isArray(filter.value)) {
+              notInValues = (filter.value as (string | number)[]).map(v => String(v));
+            } else if (typeof filter.value === 'string') {
+              notInValues = filter.value.split(',').map(v => v.trim()).filter(v => v);
+            }
+            if (notInValues.length > 0) {
+              const vals = notInValues.map(v => `'${escapeValue(v).toUpperCase()}'`).join(',');
+              whereConditions.push(`UPPER(${colRef}::text) NOT IN (${vals})`);
             }
             break;
         }
