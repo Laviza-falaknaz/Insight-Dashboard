@@ -922,32 +922,34 @@ export default function DataTablePage() {
           </div>
 
           {/* Results display */}
-          <div className="flex-1 overflow-auto p-4">
-            {result ? (
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Query Results</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {renderChart()}
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="h-full flex items-center justify-center">
-                <div className="text-center space-y-3">
-                  <div className="w-16 h-16 mx-auto rounded-full bg-muted flex items-center justify-center">
-                    <BarChart3 className="h-8 w-8 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <h3 className="font-medium">Build Your Query</h3>
-                    <p className="text-sm text-muted-foreground max-w-sm">
-                      Select columns, add filters, and run your query to see results.
-                    </p>
+          <ScrollArea className="flex-1">
+            <div className="p-4">
+              {result ? (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Query Results</CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-4">
+                    {renderChart()}
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="h-[400px] flex items-center justify-center">
+                  <div className="text-center space-y-3">
+                    <div className="w-16 h-16 mx-auto rounded-full bg-muted flex items-center justify-center">
+                      <BarChart3 className="h-8 w-8 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <h3 className="font-medium">Build Your Query</h3>
+                      <p className="text-sm text-muted-foreground max-w-sm">
+                        Select columns, add filters, and run your query to see results.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          </ScrollArea>
         </div>
       </div>
 
