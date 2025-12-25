@@ -505,10 +505,9 @@ function DataSourcePanel({
   joinConditions: JoinCondition[];
   onJoinConditionsChange: (conditions: JoinCondition[]) => void;
 }) {
-  const [inventoryOpen, setInventoryOpen] = useState(true);
-  const [returnsOpen, setReturnsOpen] = useState(false);
+  const [activeSource, setActiveSource] = useState<'inventory' | 'returns'>('inventory');
   const [searchTerm, setSearchTerm] = useState("");
-  const [relationshipsOpen, setRelationshipsOpen] = useState(false);
+  const [showJoinConfig, setShowJoinConfig] = useState(false);
 
   const filterColumns = (columns: QueryColumn[]) => {
     if (!searchTerm) return columns;
@@ -526,241 +525,213 @@ function DataSourcePanel({
     e.dataTransfer.effectAllowed = 'copy';
   };
 
+  const hasValidJoin = joinType !== 'none' && joinConditions.some(c => c.leftField && c.rightField);
+  const hasReturnsSelected = selectedEntities.includes('returns');
+
   const ColumnItem = ({ col }: { col: QueryColumn }) => (
     <div 
-      className="group flex items-center gap-1 px-2 py-1 rounded text-xs hover-elevate cursor-grab active:cursor-grabbing"
+      className="group flex items-center gap-1.5 px-2 py-1.5 rounded text-xs hover-elevate cursor-grab active:cursor-grabbing border border-transparent hover:border-border/50"
       draggable
       onDragStart={(e) => handleDragStart(e, col)}
       data-testid={`draggable-field-${col.entity}-${col.field}`}
     >
-      <GripVertical className="h-3 w-3 text-muted-foreground opacity-50 group-hover:opacity-100" />
+      <GripVertical className="h-3 w-3 text-muted-foreground/40 group-hover:text-muted-foreground" />
       {getFieldIcon(col)}
       <span className="flex-1 truncate">{col.label}</span>
-      <div className="invisible group-hover:visible flex gap-0.5">
-        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToRows(col)} title="Add to Rows">
+      <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToRows(col)} title="Add to Rows" aria-label="Add to Rows">
           <Rows3 className="h-3 w-3" />
         </Button>
-        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToColumns(col)} title="Add to Columns">
+        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToColumns(col)} title="Add to Columns" aria-label="Add to Columns">
           <Columns className="h-3 w-3" />
         </Button>
-        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToValues(col)} title="Add to Values">
+        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToValues(col)} title="Add to Values" aria-label="Add to Values">
           <Hash className="h-3 w-3" />
         </Button>
-        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToFilters(col)} title="Add to Filters">
+        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToFilters(col)} title="Add to Filters" aria-label="Add to Filters">
           <Filter className="h-3 w-3" />
         </Button>
       </div>
     </div>
   );
 
+  const activeColumns = activeSource === 'inventory' 
+    ? filterColumns(columnsData?.inventory || [])
+    : filterColumns(columnsData?.returns || []);
+
   return (
-    <div className="h-full py-2">
-      <div className="px-3 pb-3">
-        <h2 className="text-sm font-semibold flex items-center gap-2">
-          <Database className="h-4 w-4 text-muted-foreground" />
-          Data Sources
-        </h2>
+    <div className="h-full flex flex-col">
+      <div className="p-3 border-b space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Data Sources</h2>
+        </div>
+        
+        <div className="flex gap-2">
+          <button
+            onClick={() => setActiveSource('inventory')}
+            className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+              activeSource === 'inventory' 
+                ? 'bg-primary text-primary-foreground' 
+                : 'bg-muted/50 hover:bg-muted'
+            }`}
+            data-testid="button-source-inventory"
+          >
+            <Database className="h-3.5 w-3.5 mx-auto mb-1" />
+            Inventory
+          </button>
+          <div className="flex-1 flex flex-col">
+            <button
+              onClick={() => { setActiveSource('returns'); if (!hasReturnsSelected) onEntityToggle('returns'); }}
+              className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+                activeSource === 'returns' 
+                  ? 'bg-primary text-primary-foreground' 
+                  : 'bg-muted/50 hover:bg-muted'
+              }`}
+              data-testid="button-source-returns"
+            >
+              <Layers className="h-3.5 w-3.5 mx-auto mb-1" />
+              Returns
+            </button>
+            {hasReturnsSelected && (
+              <button
+                onClick={() => { onEntityToggle('returns'); setActiveSource('inventory'); }}
+                className="text-[9px] text-muted-foreground hover:text-foreground mt-0.5"
+                data-testid="button-remove-returns"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+
+        {hasReturnsSelected && (
+          <div 
+            className={`p-2 rounded-md border cursor-pointer transition-colors ${
+              hasValidJoin 
+                ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800' 
+                : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800'
+            }`}
+            onClick={() => setShowJoinConfig(!showJoinConfig)}
+            data-testid="button-toggle-join-config"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className={`h-2 w-2 rounded-full ${hasValidJoin ? 'bg-green-500' : 'bg-amber-500'}`} />
+                <span className="text-xs font-medium">
+                  {hasValidJoin ? `Linked: ${joinConditions.filter(c => c.leftField && c.rightField).length} field(s)` : 'Configure Link'}
+                </span>
+              </div>
+              {showJoinConfig ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            </div>
+            
+            {showJoinConfig && (
+              <div className="mt-3 space-y-3" onClick={e => e.stopPropagation()}>
+                <Select value={joinType} onValueChange={(v) => onJoinTypeChange(v as JoinType | 'none')}>
+                  <SelectTrigger className="h-8 text-xs" data-testid="select-join-type">
+                    <SelectValue placeholder="Select join type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Link</SelectItem>
+                    <SelectItem value="left">Include All Inventory</SelectItem>
+                    <SelectItem value="inner">Only Matching Records</SelectItem>
+                    <SelectItem value="right">Include All Returns</SelectItem>
+                    <SelectItem value="first">First Match Only</SelectItem>
+                    <SelectItem value="exists">Check If Exists</SelectItem>
+                  </SelectContent>
+                </Select>
+                
+                {joinType !== 'none' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Match Fields</span>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-5 px-1.5 text-[10px]"
+                        onClick={() => onJoinConditionsChange([...joinConditions, { leftField: '', rightField: '', comparator: '=' }])}
+                        data-testid="button-add-join-condition"
+                      >
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    
+                    {joinConditions.length === 0 && (
+                      <p className="text-[10px] text-muted-foreground">Add fields to match inventory with returns</p>
+                    )}
+                    
+                    {joinConditions.map((cond, idx) => (
+                      <div key={idx} className="flex items-center gap-1">
+                        <Select value={cond.leftField} onValueChange={(v) => {
+                          const updated = [...joinConditions];
+                          updated[idx] = { ...cond, leftField: v };
+                          onJoinConditionsChange(updated);
+                        }}>
+                          <SelectTrigger className="h-6 text-[10px] flex-1" data-testid={`select-left-field-${idx}`}>
+                            <SelectValue placeholder="Inventory" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {columnsData?.inventory.map(col => (
+                              <SelectItem key={col.field} value={col.field} className="text-xs">{col.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <span className="text-[10px] text-muted-foreground">=</span>
+                        <Select value={cond.rightField} onValueChange={(v) => {
+                          const updated = [...joinConditions];
+                          updated[idx] = { ...cond, rightField: v };
+                          onJoinConditionsChange(updated);
+                        }}>
+                          <SelectTrigger className="h-6 text-[10px] flex-1" data-testid={`select-right-field-${idx}`}>
+                            <SelectValue placeholder="Returns" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {columnsData?.returns.map(col => (
+                              <SelectItem key={col.field} value={col.field} className="text-xs">{col.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          className="h-5 w-5 p-0"
+                          onClick={() => onJoinConditionsChange(joinConditions.filter((_, i) => i !== idx))}
+                          data-testid={`button-remove-condition-${idx}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
-      <div className="px-3 space-y-3">
+
+      <div className="p-2">
         <div className="relative">
-          <Search className="absolute left-2 top-2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search fields..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-8 h-8"
+            className="pl-7 h-7 text-xs"
             data-testid="input-search-fields"
           />
         </div>
-        
-        <ScrollArea className="h-[calc(100vh-320px)]">
-          <div className="space-y-2">
-            <Collapsible open={inventoryOpen} onOpenChange={setInventoryOpen}>
-              <div className="flex items-center gap-2">
-                <Checkbox 
-                  id="entity-inventory"
-                  checked={selectedEntities.includes('inventory')}
-                  onCheckedChange={() => onEntityToggle('inventory')}
-                  data-testid="checkbox-entity-inventory"
-                />
-                <CollapsibleTrigger className="flex items-center gap-1 flex-1 text-sm font-medium hover-elevate rounded px-1">
-                  {inventoryOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  Inventory
-                  <Badge variant="secondary" className="ml-auto text-[10px]">
-                    {columnsData?.inventory.length || 0}
-                  </Badge>
-                </CollapsibleTrigger>
-              </div>
-              <CollapsibleContent className="pl-6 pt-1 space-y-0.5">
-                {filterColumns(columnsData?.inventory || []).map(col => (
-                  <ColumnItem key={`${col.entity}-${col.field}`} col={col} />
-                ))}
-              </CollapsibleContent>
-            </Collapsible>
-
-            <Collapsible open={returnsOpen} onOpenChange={setReturnsOpen}>
-              <div className="flex items-center gap-2">
-                <Checkbox 
-                  id="entity-returns"
-                  checked={selectedEntities.includes('returns')}
-                  onCheckedChange={() => onEntityToggle('returns')}
-                  data-testid="checkbox-entity-returns"
-                />
-                <CollapsibleTrigger className="flex items-center gap-1 flex-1 text-sm font-medium hover-elevate rounded px-1">
-                  {returnsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  Returns
-                  <Badge variant="secondary" className="ml-auto text-[10px]">
-                    {columnsData?.returns.length || 0}
-                  </Badge>
-                </CollapsibleTrigger>
-              </div>
-              <CollapsibleContent className="pl-6 pt-1 space-y-0.5">
-                {filterColumns(columnsData?.returns || []).map(col => (
-                  <ColumnItem key={`${col.entity}-${col.field}`} col={col} />
-                ))}
-              </CollapsibleContent>
-            </Collapsible>
-
-            {selectedEntities.includes('inventory') && selectedEntities.includes('returns') && (
-              <Collapsible open={relationshipsOpen} onOpenChange={setRelationshipsOpen}>
-                <CollapsibleTrigger className="flex items-center gap-1 w-full text-sm font-medium hover-elevate rounded px-1 py-1">
-                  {relationshipsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  <Layers className="h-4 w-4 text-purple-500" />
-                  Join Builder
-                  {joinConditions.length > 0 && (
-                    <Badge variant="secondary" className="ml-auto text-[10px]">{joinConditions.length}</Badge>
-                  )}
-                </CollapsibleTrigger>
-                <CollapsibleContent className="pl-2 pt-2 space-y-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Join Type</Label>
-                    <Select value={joinType} onValueChange={(v) => onJoinTypeChange(v as JoinType | 'none')}>
-                      <SelectTrigger className="h-8 text-xs" data-testid="select-join-type">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No Join</SelectItem>
-                        <SelectItem value="left">Left Join (All Inventory)</SelectItem>
-                        <SelectItem value="inner">Inner Join (Matches Only)</SelectItem>
-                        <SelectItem value="right">Right Join (All Returns)</SelectItem>
-                        <SelectItem value="first">First Match (1:1)</SelectItem>
-                        <SelectItem value="exists">Exists Check</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  {joinType !== 'none' && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs">Field Mappings</Label>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="h-6 px-2 text-xs"
-                          onClick={() => onJoinConditionsChange([...joinConditions, { leftField: '', rightField: '', comparator: '=' }])}
-                          data-testid="button-add-join-condition"
-                        >
-                          <Plus className="h-3 w-3 mr-1" /> Add
-                        </Button>
-                      </div>
-                      
-                      {joinConditions.length === 0 ? (
-                        <div className="text-xs text-muted-foreground text-center py-3 border border-dashed rounded">
-                          Add field mappings to define the join
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {joinConditions.map((cond, idx) => (
-                            <div key={idx} className="flex items-center gap-1 text-xs">
-                              <Select 
-                                value={cond.leftField} 
-                                onValueChange={(v) => {
-                                  const updated = [...joinConditions];
-                                  updated[idx] = { ...cond, leftField: v };
-                                  onJoinConditionsChange(updated);
-                                }}
-                              >
-                                <SelectTrigger className="h-7 text-xs flex-1" data-testid={`select-left-field-${idx}`}>
-                                  <SelectValue placeholder="Inventory field" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {columnsData?.inventory.map(col => (
-                                    <SelectItem key={col.field} value={col.field}>{col.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              
-                              <Select 
-                                value={cond.comparator} 
-                                onValueChange={(v) => {
-                                  const updated = [...joinConditions];
-                                  updated[idx] = { ...cond, comparator: v as '=' | '!=' | '>' | '<' | '>=' | '<=' };
-                                  onJoinConditionsChange(updated);
-                                }}
-                              >
-                                <SelectTrigger className="h-7 w-12 text-xs" data-testid={`select-comparator-${idx}`}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="=">=</SelectItem>
-                                  <SelectItem value="!=">!=</SelectItem>
-                                  <SelectItem value=">">&gt;</SelectItem>
-                                  <SelectItem value="<">&lt;</SelectItem>
-                                  <SelectItem value=">=">&gt;=</SelectItem>
-                                  <SelectItem value="<=">&lt;=</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              
-                              <Select 
-                                value={cond.rightField} 
-                                onValueChange={(v) => {
-                                  const updated = [...joinConditions];
-                                  updated[idx] = { ...cond, rightField: v };
-                                  onJoinConditionsChange(updated);
-                                }}
-                              >
-                                <SelectTrigger className="h-7 text-xs flex-1" data-testid={`select-right-field-${idx}`}>
-                                  <SelectValue placeholder="Returns field" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {columnsData?.returns.map(col => (
-                                    <SelectItem key={col.field} value={col.field}>{col.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              
-                              <Button 
-                                variant="ghost" 
-                                size="icon"
-                                className="h-6 w-6"
-                                onClick={() => onJoinConditionsChange(joinConditions.filter((_, i) => i !== idx))}
-                                data-testid={`button-remove-condition-${idx}`}
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      
-                      {joinConditions.length > 0 && joinConditions.every(c => c.leftField && c.rightField) && (
-                        <div className="text-xs text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/30 p-2 rounded">
-                          Ready: {joinConditions.length} field mapping(s) configured
-                        </div>
-                      )}
-                      
-                      {joinConditions.length > 0 && !joinConditions.every(c => c.leftField && c.rightField) && (
-                        <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 p-2 rounded">
-                          Incomplete: Select fields for all mappings
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </CollapsibleContent>
-              </Collapsible>
-            )}
-          </div>
-        </ScrollArea>
+      </div>
+      
+      <ScrollArea className="flex-1 px-1">
+        <div className="space-y-0.5 pb-2">
+          {activeColumns.map(col => (
+            <ColumnItem key={`${col.entity}-${col.field}`} col={col} />
+          ))}
+        </div>
+      </ScrollArea>
+      
+      <div className="p-2 border-t text-[10px] text-muted-foreground text-center">
+        Drag fields to workspace or click icons
       </div>
     </div>
   );
@@ -1179,41 +1150,42 @@ export default function DataTablePage() {
 
   return (
     <div className="h-full flex flex-col bg-background">
-      <div className="flex items-center justify-between px-6 py-4 border-b bg-card/50">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Query Builder</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Create pivot tables and visualizations from your data
-          </p>
-        </div>
+      <div className="flex items-center justify-between px-4 py-2 border-b bg-card/50">
         <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold tracking-tight" data-testid="text-page-title">Query Builder</h1>
+          <Badge variant="outline" className="text-[10px]">
+            {selectedEntities.length > 1 ? 'Multi-source' : 'Inventory'}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={clearAll} data-testid="button-clear-all">
-            <RefreshCw className="h-4 w-4 mr-2" />
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
             Reset
           </Button>
           <Button 
             onClick={executeQuery} 
             disabled={executeMutation.isPending}
-            size="default"
+            size="sm"
             data-testid="button-execute-query"
           >
-            {executeMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
-            Run Query
+            {executeMutation.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Play className="h-3.5 w-3.5 mr-1.5" />}
+            Run
           </Button>
           <Button 
             variant="outline" 
+            size="sm"
             onClick={() => setShowSaveDialog(true)}
             disabled={!result}
             data-testid="button-save-query"
           >
-            <Save className="h-4 w-4 mr-2" />
+            <Save className="h-3.5 w-3.5 mr-1.5" />
             Save
           </Button>
         </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="w-72 border-r bg-muted/20 overflow-auto">
+        <div className="w-64 border-r bg-muted/20 flex flex-col">
           <DataSourcePanel
             columnsData={columnsData}
             selectedEntities={selectedEntities}
@@ -1230,17 +1202,16 @@ export default function DataTablePage() {
         </div>
 
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="border-b p-4 bg-card/30">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Rows3 className="h-4 w-4" />
-                  <Label className="text-xs font-medium">Rows</Label>
-                  <span className="text-[10px] text-muted-foreground">(Group by)</span>
+          <div className="border-b px-4 py-3 bg-card/30">
+            <div className="flex flex-wrap gap-3">
+              <div className="flex-1 min-w-[200px]">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Rows3 className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-[11px] font-medium">Rows</span>
                 </div>
                 <div 
-                  className={`min-h-[80px] p-3 border-2 border-dashed rounded-lg space-y-1.5 transition-colors ${
-                    dragOverZone === 'rows' ? 'bg-primary/10 border-primary' : 'bg-background/50 border-muted-foreground/20'
+                  className={`min-h-[50px] p-2 border border-dashed rounded-md flex flex-wrap gap-1 transition-colors ${
+                    dragOverZone === 'rows' ? 'bg-primary/10 border-primary' : 'bg-background/50 border-muted-foreground/30'
                   }`}
                   onDragOver={(e) => { e.preventDefault(); setDragOverZone('rows'); }}
                   onDragLeave={() => setDragOverZone(null)}
@@ -1255,9 +1226,7 @@ export default function DataTablePage() {
                   data-testid="dropzone-rows"
                 >
                   {rowFields.length === 0 ? (
-                    <p className="text-xs text-muted-foreground text-center py-3">
-                      Drag fields here
-                    </p>
+                    <span className="text-[10px] text-muted-foreground w-full text-center py-2">Drop group-by fields</span>
                   ) : (
                     rowFields.map(field => (
                       <FieldPill
@@ -1275,57 +1244,14 @@ export default function DataTablePage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Columns className="h-4 w-4" />
-                  <Label className="text-xs font-medium">Columns</Label>
-                  <span className="text-[10px] text-muted-foreground">(Split by)</span>
+              <div className="flex-1 min-w-[200px]">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Hash className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-[11px] font-medium">Values</span>
                 </div>
                 <div 
-                  className={`min-h-[80px] p-3 border-2 border-dashed rounded-lg space-y-1.5 transition-colors ${
-                    dragOverZone === 'columns' ? 'bg-primary/10 border-primary' : 'bg-background/50 border-muted-foreground/20'
-                  }`}
-                  onDragOver={(e) => { e.preventDefault(); setDragOverZone('columns'); }}
-                  onDragLeave={() => setDragOverZone(null)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDragOverZone(null);
-                    try {
-                      const col = JSON.parse(e.dataTransfer.getData('application/json')) as QueryColumn;
-                      addToColumns(col);
-                    } catch {}
-                  }}
-                  data-testid="dropzone-columns"
-                >
-                  {columnFields.length === 0 ? (
-                    <p className="text-xs text-muted-foreground text-center py-3">
-                      Drag fields here
-                    </p>
-                  ) : (
-                    columnFields.map(field => (
-                      <FieldPill
-                        key={field.id}
-                        field={field}
-                        onRemove={() => removeColumnField(field.id)}
-                        onSortChange={(sort) => updateColumnField(field.id, { sortOrder: sort })}
-                        onFilterChange={(values) => updateColumnField(field.id, { filterValues: values })}
-                        onFilterOperatorChange={(op) => updateColumnField(field.id, { filterOperator: op })}
-                        showAggregation={false}
-                      />
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Hash className="h-4 w-4" />
-                  <Label className="text-xs font-medium">Values</Label>
-                  <span className="text-[10px] text-muted-foreground">(Sum/Count)</span>
-                </div>
-                <div 
-                  className={`min-h-[80px] p-3 border-2 border-dashed rounded-lg space-y-1.5 transition-colors ${
-                    dragOverZone === 'values' ? 'bg-primary/10 border-primary' : 'bg-background/50 border-muted-foreground/20'
+                  className={`min-h-[50px] p-2 border border-dashed rounded-md flex flex-wrap gap-1 transition-colors ${
+                    dragOverZone === 'values' ? 'bg-primary/10 border-primary' : 'bg-background/50 border-muted-foreground/30'
                   }`}
                   onDragOver={(e) => { e.preventDefault(); setDragOverZone('values'); }}
                   onDragLeave={() => setDragOverZone(null)}
@@ -1340,9 +1266,7 @@ export default function DataTablePage() {
                   data-testid="dropzone-values"
                 >
                   {valueFields.length === 0 ? (
-                    <p className="text-xs text-muted-foreground text-center py-3">
-                      Drag any field (numeric or text)
-                    </p>
+                    <span className="text-[10px] text-muted-foreground w-full text-center py-2">Drop measure fields</span>
                   ) : (
                     valueFields.map(field => (
                       <FieldPill
@@ -1359,15 +1283,14 @@ export default function DataTablePage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Filter className="h-4 w-4" />
-                  <Label className="text-xs font-medium">Filters</Label>
-                  <span className="text-[10px] text-muted-foreground">(Limit data)</span>
+              <div className="flex-1 min-w-[200px]">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-[11px] font-medium">Filters</span>
                 </div>
                 <div 
-                  className={`min-h-[80px] p-3 border-2 border-dashed rounded-lg space-y-1.5 transition-colors ${
-                    dragOverZone === 'filters' ? 'bg-primary/10 border-primary' : 'bg-background/50 border-muted-foreground/20'
+                  className={`min-h-[50px] p-2 border border-dashed rounded-md flex flex-wrap gap-1 transition-colors ${
+                    dragOverZone === 'filters' ? 'bg-primary/10 border-primary' : 'bg-background/50 border-muted-foreground/30'
                   }`}
                   onDragOver={(e) => { e.preventDefault(); setDragOverZone('filters'); }}
                   onDragLeave={() => setDragOverZone(null)}
@@ -1382,9 +1305,7 @@ export default function DataTablePage() {
                   data-testid="dropzone-filters"
                 >
                   {globalFilters.length === 0 ? (
-                    <p className="text-xs text-muted-foreground text-center py-3">
-                      Drag fields here
-                    </p>
+                    <span className="text-[10px] text-muted-foreground w-full text-center py-2">Drop filter fields</span>
                   ) : (
                     globalFilters.map(field => (
                       <FieldPill
@@ -1402,29 +1323,28 @@ export default function DataTablePage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-4 pt-2">
-              <div className="flex items-center gap-2">
-                <Label className="text-xs">Chart Type:</Label>
-                <div className="flex gap-1">
-                  {CHART_TYPES.map(ct => (
-                    <Button
-                      key={ct.value}
-                      variant={chartType === ct.value ? "default" : "outline"}
-                      size="sm"
-                      className="h-7 px-2"
-                      onClick={() => setChartType(ct.value)}
-                      data-testid={`button-chart-${ct.value}`}
-                    >
-                      <ct.icon className="h-3 w-3 mr-1" />
-                      {ct.label}
-                    </Button>
-                  ))}
-                </div>
+            <div className="flex items-center gap-4 pt-2 border-t mt-3">
+              <div className="flex items-center gap-1 pt-2">
+                {CHART_TYPES.map(ct => (
+                  <Button
+                    key={ct.value}
+                    variant={chartType === ct.value ? "default" : "ghost"}
+                    size="sm"
+                    className="h-7 px-2"
+                    onClick={() => setChartType(ct.value)}
+                    title={ct.label}
+                    aria-label={ct.label}
+                    data-testid={`button-chart-${ct.value}`}
+                  >
+                    <ct.icon className="h-3.5 w-3.5" />
+                    <span className="sr-only">{ct.label}</span>
+                  </Button>
+                ))}
               </div>
-              <div className="flex items-center gap-2">
-                <Label className="text-xs">Limit:</Label>
+              <div className="flex items-center gap-1.5 pt-2 ml-auto">
+                <span className="text-[10px] text-muted-foreground">Rows:</span>
                 <Select value={String(limit)} onValueChange={(v) => setLimit(parseInt(v))}>
-                  <SelectTrigger className="h-7 w-20">
+                  <SelectTrigger className="h-6 w-16 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1474,6 +1394,39 @@ export default function DataTablePage() {
               </div>
             )}
           </div>
+          
+          {(rowFields.length > 0 || valueFields.length > 0 || globalFilters.length > 0) && (
+            <div className="px-4 py-2 border-t bg-muted/30 flex items-center gap-4 text-[10px] text-muted-foreground">
+              <div className="flex items-center gap-1">
+                <Database className="h-3 w-3" />
+                <span>{selectedEntities.join(' + ')}</span>
+              </div>
+              {rowFields.length > 0 && (
+                <div className="flex items-center gap-1">
+                  <Rows3 className="h-3 w-3" />
+                  <span>{rowFields.length} group{rowFields.length !== 1 ? 's' : ''}</span>
+                </div>
+              )}
+              {valueFields.length > 0 && (
+                <div className="flex items-center gap-1">
+                  <Hash className="h-3 w-3" />
+                  <span>{valueFields.length} measure{valueFields.length !== 1 ? 's' : ''}</span>
+                </div>
+              )}
+              {globalFilters.length > 0 && (
+                <div className="flex items-center gap-1">
+                  <Filter className="h-3 w-3" />
+                  <span>{globalFilters.length} filter{globalFilters.length !== 1 ? 's' : ''}</span>
+                </div>
+              )}
+              {result && (
+                <div className="ml-auto flex items-center gap-2">
+                  <Badge variant="secondary" className="text-[9px] px-1.5 py-0">{result.rowCount} rows</Badge>
+                  <Badge variant="outline" className="text-[9px] px-1.5 py-0">{result.executionTime}ms</Badge>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
