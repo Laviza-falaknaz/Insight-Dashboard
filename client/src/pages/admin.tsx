@@ -345,13 +345,13 @@ function EntityConfigManager() {
     queryKey: ["/api/admin/entities"],
   });
 
-  const { data: columnsData } = useQuery<{ columns: QueryColumn[] }>({
+  const { data: columnsData } = useQuery<Record<string, QueryColumn[]>>({
     queryKey: ["/api/query-builder/columns"],
   });
 
   const getColumnsForEntity = (entityId: string) => {
-    if (!columnsData?.columns) return [];
-    return columnsData.columns.filter(c => c.entity === entityId);
+    if (!columnsData) return [];
+    return columnsData[entityId] || [];
   };
 
   const toggleVisibilityMutation = useMutation({
