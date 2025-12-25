@@ -679,13 +679,24 @@ export interface TopBottomFilter {
   byColumn: string;
 }
 
-// Relationship configuration for joins
+// Join types supported
+export type JoinType = 'inner' | 'left' | 'right' | 'first' | 'exists';
+
+// Single field mapping condition
+export interface JoinCondition {
+  leftField: string;
+  rightField: string;
+  comparator: '=' | '!=' | '>' | '<' | '>=' | '<=';
+}
+
+// Dynamic relationship configuration for joins
 export interface QueryRelationship {
-  fromEntity: QueryEntity;
-  fromField: string;
-  toEntity: QueryEntity;
-  toField: string;
-  type: 'inner' | 'left' | 'right';
+  id: string;
+  leftEntity: QueryEntity;
+  rightEntity: QueryEntity;
+  joinType: JoinType;
+  conditions: JoinCondition[];
+  enabled: boolean;
 }
 
 // Complete query builder configuration
@@ -722,6 +733,7 @@ export interface QueryResult {
   rowCount: number;
   executionTime: number;
   sql?: string;
+  warnings?: string[];
 }
 
 // AI interpretation for query results

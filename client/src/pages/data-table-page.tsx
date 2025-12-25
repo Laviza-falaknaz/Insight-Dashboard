@@ -31,7 +31,8 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { 
   QueryColumn, QueryBuilderConfig, QueryDimension, QueryMeasure, 
-  QueryFilter, QuerySort, QueryResult, ChartType, AggregationType, FilterOperator, QueryEntity
+  QueryFilter, QuerySort, QueryResult, ChartType, AggregationType, FilterOperator, QueryEntity,
+  JoinType, JoinCondition, QueryRelationship
 } from "@shared/schema";
 
 const CHART_COLORS = [
@@ -489,6 +490,8 @@ function DataSourcePanel({
   onAddToFilters,
   joinType,
   onJoinTypeChange,
+  joinConditions,
+  onJoinConditionsChange,
 }: {
   columnsData: { inventory: QueryColumn[]; returns: QueryColumn[]; relationships: any[] } | undefined;
   selectedEntities: QueryEntity[];
@@ -497,8 +500,10 @@ function DataSourcePanel({
   onAddToColumns: (col: QueryColumn) => void;
   onAddToValues: (col: QueryColumn) => void;
   onAddToFilters: (col: QueryColumn) => void;
-  joinType: 'left' | 'inner' | 'none';
-  onJoinTypeChange: (type: 'left' | 'inner' | 'none') => void;
+  joinType: JoinType | 'none';
+  onJoinTypeChange: (type: JoinType | 'none') => void;
+  joinConditions: JoinCondition[];
+  onJoinConditionsChange: (conditions: JoinCondition[]) => void;
 }) {
   const [inventoryOpen, setInventoryOpen] = useState(true);
   const [returnsOpen, setReturnsOpen] = useState(false);
@@ -621,31 +626,134 @@ function DataSourcePanel({
                 <CollapsibleTrigger className="flex items-center gap-1 w-full text-sm font-medium hover-elevate rounded px-1 py-1">
                   {relationshipsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                   <Layers className="h-4 w-4 text-purple-500" />
-                  Relationships
+                  Join Builder
+                  {joinConditions.length > 0 && (
+                    <Badge variant="secondary" className="ml-auto text-[10px]">{joinConditions.length}</Badge>
+                  )}
                 </CollapsibleTrigger>
-                <CollapsibleContent className="pl-6 pt-2 space-y-2">
-                  <div className="text-xs text-muted-foreground mb-2">
-                    Join Inventory and Returns by Serial ID, Area ID, and Item ID
-                  </div>
+                <CollapsibleContent className="pl-2 pt-2 space-y-3">
                   <div className="space-y-1">
                     <Label className="text-xs">Join Type</Label>
-                    <Select value={joinType} onValueChange={(v) => onJoinTypeChange(v as 'left' | 'inner' | 'none')}>
+                    <Select value={joinType} onValueChange={(v) => onJoinTypeChange(v as JoinType | 'none')}>
                       <SelectTrigger className="h-8 text-xs" data-testid="select-join-type">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="left">Left Join (All Inventory)</SelectItem>
-                        <SelectItem value="inner">Inner Join (Only Matches)</SelectItem>
                         <SelectItem value="none">No Join</SelectItem>
+                        <SelectItem value="left">Left Join (All Inventory)</SelectItem>
+                        <SelectItem value="inner">Inner Join (Matches Only)</SelectItem>
+                        <SelectItem value="right">Right Join (All Returns)</SelectItem>
+                        <SelectItem value="first">First Match (1:1)</SelectItem>
+                        <SelectItem value="exists">Exists Check</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
+                  
                   {joinType !== 'none' && (
-                    <div className="text-xs bg-muted p-2 rounded space-y-1">
-                      <div className="font-medium">Join Keys:</div>
-                      <div className="text-muted-foreground">inventory.serial_id = returns.serial_id</div>
-                      <div className="text-muted-foreground">inventory.data_area_id = returns.area_id</div>
-                      <div className="text-muted-foreground">inventory.item_id = returns.item_id</div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs">Field Mappings</Label>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-6 px-2 text-xs"
+                          onClick={() => onJoinConditionsChange([...joinConditions, { leftField: '', rightField: '', comparator: '=' }])}
+                          data-testid="button-add-join-condition"
+                        >
+                          <Plus className="h-3 w-3 mr-1" /> Add
+                        </Button>
+                      </div>
+                      
+                      {joinConditions.length === 0 ? (
+                        <div className="text-xs text-muted-foreground text-center py-3 border border-dashed rounded">
+                          Add field mappings to define the join
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {joinConditions.map((cond, idx) => (
+                            <div key={idx} className="flex items-center gap-1 text-xs">
+                              <Select 
+                                value={cond.leftField} 
+                                onValueChange={(v) => {
+                                  const updated = [...joinConditions];
+                                  updated[idx] = { ...cond, leftField: v };
+                                  onJoinConditionsChange(updated);
+                                }}
+                              >
+                                <SelectTrigger className="h-7 text-xs flex-1" data-testid={`select-left-field-${idx}`}>
+                                  <SelectValue placeholder="Inventory field" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {columnsData?.inventory.map(col => (
+                                    <SelectItem key={col.field} value={col.field}>{col.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              
+                              <Select 
+                                value={cond.comparator} 
+                                onValueChange={(v) => {
+                                  const updated = [...joinConditions];
+                                  updated[idx] = { ...cond, comparator: v as '=' | '!=' | '>' | '<' | '>=' | '<=' };
+                                  onJoinConditionsChange(updated);
+                                }}
+                              >
+                                <SelectTrigger className="h-7 w-12 text-xs" data-testid={`select-comparator-${idx}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="=">=</SelectItem>
+                                  <SelectItem value="!=">!=</SelectItem>
+                                  <SelectItem value=">">&gt;</SelectItem>
+                                  <SelectItem value="<">&lt;</SelectItem>
+                                  <SelectItem value=">=">&gt;=</SelectItem>
+                                  <SelectItem value="<=">&lt;=</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              
+                              <Select 
+                                value={cond.rightField} 
+                                onValueChange={(v) => {
+                                  const updated = [...joinConditions];
+                                  updated[idx] = { ...cond, rightField: v };
+                                  onJoinConditionsChange(updated);
+                                }}
+                              >
+                                <SelectTrigger className="h-7 text-xs flex-1" data-testid={`select-right-field-${idx}`}>
+                                  <SelectValue placeholder="Returns field" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {columnsData?.returns.map(col => (
+                                    <SelectItem key={col.field} value={col.field}>{col.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              
+                              <Button 
+                                variant="ghost" 
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={() => onJoinConditionsChange(joinConditions.filter((_, i) => i !== idx))}
+                                data-testid={`button-remove-condition-${idx}`}
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      
+                      {joinConditions.length > 0 && joinConditions.every(c => c.leftField && c.rightField) && (
+                        <div className="text-xs text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/30 p-2 rounded">
+                          Ready: {joinConditions.length} field mapping(s) configured
+                        </div>
+                      )}
+                      
+                      {joinConditions.length > 0 && !joinConditions.every(c => c.leftField && c.rightField) && (
+                        <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 p-2 rounded">
+                          Incomplete: Select fields for all mappings
+                        </div>
+                      )}
                     </div>
                   )}
                 </CollapsibleContent>
@@ -673,7 +781,8 @@ export default function DataTablePage() {
   const [queryName, setQueryName] = useState("");
   const [queryDescription, setQueryDescription] = useState("");
   const [activeView, setActiveView] = useState<'builder' | 'results'>('builder');
-  const [joinType, setJoinType] = useState<'left' | 'inner' | 'none'>('left');
+  const [joinType, setJoinType] = useState<JoinType | 'none'>('none');
+  const [joinConditions, setJoinConditions] = useState<JoinCondition[]>([]);
   const [dragOverZone, setDragOverZone] = useState<string | null>(null);
 
   const { data: columnsData, isLoading: columnsLoading } = useQuery<{
@@ -692,7 +801,11 @@ export default function DataTablePage() {
     onSuccess: (data: QueryResult) => {
       setResult(data);
       setActiveView('results');
-      toast({ title: "Query executed", description: `${data.rowCount} rows in ${data.executionTime}ms` });
+      if (data.warnings && data.warnings.length > 0) {
+        toast({ title: "Query executed with warnings", description: data.warnings[0], variant: "destructive" });
+      } else {
+        toast({ title: "Query executed", description: `${data.rowCount} rows in ${data.executionTime}ms` });
+      }
     },
     onError: (error: any) => {
       toast({ title: "Query failed", description: error.message, variant: "destructive" });
@@ -828,8 +941,15 @@ export default function DataTablePage() {
       measures,
       filters,
       sorts,
-      relationships: selectedEntities.includes('returns') && columnsData?.relationships && joinType !== 'none' ? 
-        [{ ...columnsData.relationships[0], type: joinType as 'left' | 'inner' }] : [],
+      relationships: selectedEntities.includes('returns') && joinType !== 'none' && joinConditions.length > 0 ? 
+        [{
+          id: 'rel-1',
+          leftEntity: 'inventory' as QueryEntity,
+          rightEntity: 'returns' as QueryEntity,
+          joinType: joinType as JoinType,
+          conditions: joinConditions,
+          enabled: true
+        }] : [],
       limit,
     };
   };
@@ -1034,6 +1154,8 @@ export default function DataTablePage() {
             onAddToFilters={addToFilters}
             joinType={joinType}
             onJoinTypeChange={setJoinType}
+            joinConditions={joinConditions}
+            onJoinConditionsChange={setJoinConditions}
           />
         </div>
 

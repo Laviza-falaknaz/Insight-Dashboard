@@ -4173,17 +4173,85 @@ Be specific with numbers and percentages when available. Prioritize actionable r
         selectParts.push(`${aggExpr} as "${measure.alias}"`);
       }
 
-      // Build FROM clause with optional JOIN
+      // Build FROM clause with dynamic JOIN construction
       let fromClause = 'FROM inventory i';
       const hasReturns = config.entities.includes('returns');
+      let joinWarnings: string[] = [];
+      
       if (hasReturns && config.relationships.length > 0) {
         const rel = config.relationships[0];
-        const joinType = rel.type === 'inner' ? 'INNER JOIN' : rel.type === 'left' ? 'LEFT JOIN' : 'RIGHT JOIN';
-        fromClause += ` ${joinType} returns r ON i.invent_serial_id = r.serial_id AND i.data_area_id = r.area_id AND i.item_id = r.item_id`;
+        
+        // Only process enabled relationships with conditions
+        if (rel.enabled && rel.conditions && rel.conditions.length > 0) {
+          // Map join type to SQL
+          let joinSQL = '';
+          switch (rel.joinType) {
+            case 'inner':
+              joinSQL = 'INNER JOIN';
+              break;
+            case 'left':
+              joinSQL = 'LEFT JOIN';
+              break;
+            case 'right':
+              joinSQL = 'RIGHT JOIN';
+              break;
+            case 'first':
+              // First = LATERAL subquery with LIMIT 1
+              joinSQL = 'LEFT JOIN LATERAL';
+              break;
+            case 'exists':
+              // Exists = will be handled separately in WHERE
+              break;
+            default:
+              joinSQL = 'LEFT JOIN';
+          }
+          
+          // Build ON conditions from user-defined field mappings
+          const onConditions: string[] = [];
+          for (const cond of rel.conditions) {
+            const leftCol = fieldToColumn(rel.leftEntity, cond.leftField);
+            const rightCol = fieldToColumn(rel.rightEntity, cond.rightField);
+            const comparator = cond.comparator || '=';
+            onConditions.push(`${leftCol} ${comparator} ${rightCol}`);
+          }
+          
+          if (rel.joinType === 'exists') {
+            // EXISTS check - will add to WHERE clause later
+            const existsConditions = onConditions.join(' AND ');
+            fromClause += ''; // No join clause for EXISTS
+            // We'll add EXISTS subquery to whereConditions below
+          } else if (rel.joinType === 'first') {
+            // LATERAL join with LIMIT 1 for "first match" semantics
+            const lateralConditions = onConditions.join(' AND ');
+            fromClause += ` LEFT JOIN LATERAL (
+              SELECT * FROM returns r2 
+              WHERE ${lateralConditions.replace(/r\./g, 'r2.').replace(/i\./g, 'i.')}
+              LIMIT 1
+            ) r ON true`;
+          } else {
+            // Standard join with user-defined conditions
+            fromClause += ` ${joinSQL} returns r ON ${onConditions.join(' AND ')}`;
+          }
+        }
       }
 
       // Build WHERE clause from filters
       const whereConditions: string[] = [];
+      
+      // Add EXISTS subquery if join type is 'exists'
+      if (hasReturns && config.relationships.length > 0) {
+        const rel = config.relationships[0];
+        if (rel.enabled && rel.joinType === 'exists' && rel.conditions && rel.conditions.length > 0) {
+          const existsConditions: string[] = [];
+          for (const cond of rel.conditions) {
+            const leftCol = fieldToColumn(rel.leftEntity, cond.leftField);
+            const rightCol = cond.rightField.replace(/^r\./, 're.');
+            existsConditions.push(`${leftCol} ${cond.comparator || '='} re.${rightCol.replace('r.', '')}`);
+          }
+          whereConditions.push(`EXISTS (SELECT 1 FROM returns re WHERE ${existsConditions.join(' AND ')})`);
+        }
+      }
+      
       for (const filter of config.filters) {
         const colRef = fieldToColumn(filter.column.entity, filter.column.field);
         switch (filter.operator) {
@@ -4367,11 +4435,21 @@ Be specific with numbers and percentages when available. Prioritize actionable r
 
         const pivotedData = Array.from(rowKeyToData.values());
         
+        // Build warnings array
+        const warnings: string[] = [];
+        if (pivotedData.length === 0 && hasReturns && config.relationships.length > 0) {
+          const rel = config.relationships[0];
+          if (rel.enabled && rel.conditions && rel.conditions.length > 0) {
+            warnings.push(`No matching records found with the configured join. Check if your field mappings are correct.`);
+          }
+        }
+        
         const queryResult: QueryResult = {
           data: pivotedData,
           columns: pivotedColumns,
           rowCount: pivotedData.length,
           executionTime,
+          warnings: warnings.length > 0 ? warnings : undefined,
         };
 
         res.json(queryResult);
@@ -4384,11 +4462,21 @@ Be specific with numbers and percentages when available. Prioritize actionable r
         ...config.measures.map(m => ({ key: m.alias, label: m.alias, type: 'numeric' })),
       ];
 
+      // Build warnings array
+      const warnings: string[] = [];
+      if (flatData.length === 0 && hasReturns && config.relationships.length > 0) {
+        const rel = config.relationships[0];
+        if (rel.enabled && rel.conditions && rel.conditions.length > 0) {
+          warnings.push(`No matching records found with the configured join. Check if your field mappings are correct.`);
+        }
+      }
+
       const queryResult: QueryResult = {
         data: flatData,
         columns,
         rowCount: flatData.length,
         executionTime,
+        warnings: warnings.length > 0 ? warnings : undefined,
       };
 
       res.json(queryResult);
