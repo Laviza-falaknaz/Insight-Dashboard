@@ -3858,6 +3858,11 @@ Be specific with numbers and percentages when available. Prioritize actionable r
   // Get available columns for query builder
   app.get("/api/query-builder/columns", requireAuth, async (_req: Request, res: Response) => {
     const inventoryColumns: QueryColumn[] = [
+      // Text/Dimension fields
+      { entity: 'inventory', field: 'dataAreaId', label: 'Data Area ID', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'itemId', label: 'Item ID', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'inventSerialId', label: 'Serial ID', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'dealRef', label: 'Deal Reference', type: 'text', aggregatable: false },
       { entity: 'inventory', field: 'category', label: 'Category', type: 'text', aggregatable: false },
       { entity: 'inventory', field: 'make', label: 'Make/Brand', type: 'text', aggregatable: false },
       { entity: 'inventory', field: 'modelNum', label: 'Model', type: 'text', aggregatable: false },
@@ -3868,20 +3873,61 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       { entity: 'inventory', field: 'transType', label: 'Transaction Type', type: 'text', aggregatable: false },
       { entity: 'inventory', field: 'segregation', label: 'Region', type: 'text', aggregatable: false },
       { entity: 'inventory', field: 'processor', label: 'Processor', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'processorGen', label: 'Processor Generation', type: 'text', aggregatable: false },
       { entity: 'inventory', field: 'ram', label: 'RAM', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'soldAsRAM', label: 'Sold As RAM', type: 'text', aggregatable: false },
       { entity: 'inventory', field: 'hdd', label: 'Storage', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'soldAsHDD', label: 'Sold As HDD', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'storageType', label: 'Storage Type', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'chassis', label: 'Chassis', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'displaySize', label: 'Display Size', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'resolution', label: 'Resolution', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'keyLayout', label: 'Keyboard Layout', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'keyLang', label: 'Keyboard Language', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'osSticker', label: 'OS Sticker', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'madeIn', label: 'Made In', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'purchaseCategory', label: 'Purchase Category', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'poNumber', label: 'PO Number', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'salesId', label: 'Sales ID', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'salesInvoiceId', label: 'Invoice ID', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'invoiceAccount', label: 'Invoice Account', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'customerRef', label: 'Customer Ref', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'crmRef', label: 'CRM Ref', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'orderTaker', label: 'Order Taker', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'orderResponsible', label: 'Order Responsible', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'manufacturerSerialNum', label: 'Manufacturer Serial', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'storageSerialNum', label: 'Storage Serial', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'warrantyDescription', label: 'Warranty Description', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'productSpecification', label: 'Product Spec', type: 'text', aggregatable: false },
+      // Date fields
       { entity: 'inventory', field: 'invoiceDate', label: 'Invoice Date', type: 'date', aggregatable: false },
       { entity: 'inventory', field: 'salesOrderDate', label: 'Sales Order Date', type: 'date', aggregatable: false },
       { entity: 'inventory', field: 'purchDate', label: 'Purchase Date', type: 'date', aggregatable: false },
+      { entity: 'inventory', field: 'receivedDate', label: 'Received Date', type: 'date', aggregatable: false },
+      { entity: 'inventory', field: 'manufacturingDate', label: 'Manufacturing Date', type: 'date', aggregatable: false },
+      { entity: 'inventory', field: 'warrantyStartDate', label: 'Warranty Start', type: 'date', aggregatable: false },
+      { entity: 'inventory', field: 'warrantyEndDate', label: 'Warranty End', type: 'date', aggregatable: false },
+      // Numeric/Measure fields
       { entity: 'inventory', field: 'finalSalesPriceUSD', label: 'Sales Price (USD)', type: 'numeric', aggregatable: true },
       { entity: 'inventory', field: 'finalTotalCostUSD', label: 'Total Cost (USD)', type: 'numeric', aggregatable: true },
       { entity: 'inventory', field: 'purchPriceUSD', label: 'Purchase Price (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'purchPriceRevisedUSD', label: 'Purchase Price Revised (USD)', type: 'numeric', aggregatable: true },
       { entity: 'inventory', field: 'partsCostUSD', label: 'Parts Cost (USD)', type: 'numeric', aggregatable: true },
       { entity: 'inventory', field: 'freightChargesUSD', label: 'Freight (USD)', type: 'numeric', aggregatable: true },
       { entity: 'inventory', field: 'resourceCostUSD', label: 'Labor Cost (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'lcdCostUSD', label: 'LCD Cost (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'miscCostUSD', label: 'Misc Cost (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'packagingCostUSD', label: 'Packaging Cost (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'itadTreesCostUSD', label: 'ITAD Trees Cost (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'standardisationCostUSD', label: 'Standardisation Cost (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'consumableCostUSD', label: 'Consumable Cost (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'batteryCostUSD', label: 'Battery Cost (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'coaCostUSD', label: 'COA Cost (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'customsDutyUSD', label: 'Customs Duty (USD)', type: 'numeric', aggregatable: true },
     ];
     
     const returnsColumns: QueryColumn[] = [
+      // Text/Dimension fields
       { entity: 'returns', field: 'rmaNumber', label: 'RMA Number', type: 'text', aggregatable: false },
       { entity: 'returns', field: 'rmaStatus', label: 'RMA Status', type: 'text', aggregatable: false },
       { entity: 'returns', field: 'reasonForReturn', label: 'Reason for Return', type: 'text', aggregatable: false },
@@ -3889,10 +3935,27 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       { entity: 'returns', field: 'lineSolution', label: 'Solution', type: 'text', aggregatable: false },
       { entity: 'returns', field: 'finalCustomer', label: 'Final Customer', type: 'text', aggregatable: false },
       { entity: 'returns', field: 'caseCustomer', label: 'Case Customer', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'caseEndUser', label: 'Case End User', type: 'text', aggregatable: false },
       { entity: 'returns', field: 'typeOfUnit', label: 'Unit Type', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'caseId', label: 'Case ID', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'rmaLineName', label: 'RMA Line Name', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'relatedOrderName', label: 'Related Order', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'finalResellerName', label: 'Final Reseller', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'finalDistributorName', label: 'Final Distributor', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'opportunityNumber', label: 'Opportunity Number', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'rmaTopicLabel', label: 'RMA Topic', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'ukFinalOutcome', label: 'UK Final Outcome', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'uaeFinalOutcome', label: 'UAE Final Outcome', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'serialId', label: 'Serial ID', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'areaId', label: 'Area ID', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'itemId', label: 'Item ID', type: 'text', aggregatable: false },
+      // Date fields
       { entity: 'returns', field: 'createdOn', label: 'Created Date', type: 'date', aggregatable: false },
+      { entity: 'returns', field: 'modifiedOn', label: 'Modified Date', type: 'date', aggregatable: false },
       { entity: 'returns', field: 'itemReceivedDate', label: 'Item Received Date', type: 'date', aggregatable: false },
+      { entity: 'returns', field: 'itemTestingDate', label: 'Item Testing Date', type: 'date', aggregatable: false },
       { entity: 'returns', field: 'dispatchDate', label: 'Dispatch Date', type: 'date', aggregatable: false },
+      { entity: 'returns', field: 'expectedShippingDate', label: 'Expected Shipping Date', type: 'date', aggregatable: false },
     ];
 
     res.json({
@@ -3904,7 +3967,12 @@ Be specific with numbers and percentages when available. Prioritize actionable r
           fromField: 'inventSerialId',
           toEntity: 'returns',
           toField: 'serialId',
-          label: 'Inventory to Returns (by Serial)'
+          label: 'Inventory to Returns (by Serial ID)',
+          joinFields: [
+            { from: 'inventSerialId', to: 'serialId' },
+            { from: 'dataAreaId', to: 'areaId' },
+            { from: 'itemId', to: 'itemId' }
+          ]
         }
       ]
     });
@@ -3923,13 +3991,22 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       // Whitelist of allowed fields per entity
       const allowedFields: Record<string, string[]> = {
         inventory: [
-          'category', 'make', 'modelNum', 'invoicingName', 'vendName', 'gradeCondition',
-          'status', 'transType', 'segregation', 'processor', 'ram', 'hdd',
-          'invoiceDate', 'salesOrderDate', 'purchDate'
+          'dataAreaId', 'itemId', 'inventSerialId', 'dealRef', 'category', 'make', 'modelNum',
+          'invoicingName', 'vendName', 'gradeCondition', 'status', 'transType', 'segregation',
+          'processor', 'processorGen', 'ram', 'soldAsRAM', 'hdd', 'soldAsHDD', 'storageType',
+          'chassis', 'displaySize', 'resolution', 'keyLayout', 'keyLang', 'osSticker', 'madeIn',
+          'purchaseCategory', 'poNumber', 'salesId', 'salesInvoiceId', 'invoiceAccount',
+          'customerRef', 'crmRef', 'orderTaker', 'orderResponsible', 'manufacturerSerialNum',
+          'storageSerialNum', 'warrantyDescription', 'productSpecification',
+          'invoiceDate', 'salesOrderDate', 'purchDate', 'receivedDate', 'manufacturingDate',
+          'warrantyStartDate', 'warrantyEndDate'
         ],
         returns: [
           'rmaNumber', 'rmaStatus', 'reasonForReturn', 'lineStatus', 'lineSolution',
-          'finalCustomer', 'caseCustomer', 'typeOfUnit', 'createdOn', 'itemReceivedDate', 'dispatchDate'
+          'finalCustomer', 'caseCustomer', 'caseEndUser', 'typeOfUnit', 'caseId', 'rmaLineName',
+          'relatedOrderName', 'finalResellerName', 'finalDistributorName', 'opportunityNumber',
+          'rmaTopicLabel', 'ukFinalOutcome', 'uaeFinalOutcome', 'serialId', 'areaId', 'itemId',
+          'createdOn', 'modifiedOn', 'itemReceivedDate', 'itemTestingDate', 'dispatchDate', 'expectedShippingDate'
         ]
       };
       
@@ -4137,7 +4214,7 @@ Be specific with numbers and percentages when available. Prioritize actionable r
           case 'in':
             let inValues: string[] = [];
             if (Array.isArray(filter.value)) {
-              inValues = filter.value;
+              inValues = (filter.value as (string | number)[]).map(v => String(v));
             } else if (typeof filter.value === 'string') {
               inValues = filter.value.split(',').map(v => v.trim()).filter(v => v);
             }

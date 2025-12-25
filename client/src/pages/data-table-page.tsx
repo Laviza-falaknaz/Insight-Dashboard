@@ -307,6 +307,8 @@ function DataSourcePanel({
   onAddToColumns,
   onAddToValues,
   onAddToFilters,
+  joinType,
+  onJoinTypeChange,
 }: {
   columnsData: { inventory: QueryColumn[]; returns: QueryColumn[]; relationships: any[] } | undefined;
   selectedEntities: QueryEntity[];
@@ -315,10 +317,13 @@ function DataSourcePanel({
   onAddToColumns: (col: QueryColumn) => void;
   onAddToValues: (col: QueryColumn) => void;
   onAddToFilters: (col: QueryColumn) => void;
+  joinType: 'left' | 'inner' | 'none';
+  onJoinTypeChange: (type: 'left' | 'inner' | 'none') => void;
 }) {
   const [inventoryOpen, setInventoryOpen] = useState(true);
   const [returnsOpen, setReturnsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [relationshipsOpen, setRelationshipsOpen] = useState(false);
 
   const filterColumns = (columns: QueryColumn[]) => {
     if (!searchTerm) return columns;
@@ -331,8 +336,19 @@ function DataSourcePanel({
     return <Columns className="h-3 w-3 text-green-500" />;
   };
 
+  const handleDragStart = (e: React.DragEvent, col: QueryColumn) => {
+    e.dataTransfer.setData('application/json', JSON.stringify(col));
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
   const ColumnItem = ({ col }: { col: QueryColumn }) => (
-    <div className="group flex items-center gap-1 px-2 py-1 rounded text-xs hover-elevate">
+    <div 
+      className="group flex items-center gap-1 px-2 py-1 rounded text-xs hover-elevate cursor-grab active:cursor-grabbing"
+      draggable
+      onDragStart={(e) => handleDragStart(e, col)}
+      data-testid={`draggable-field-${col.entity}-${col.field}`}
+    >
+      <GripVertical className="h-3 w-3 text-muted-foreground opacity-50 group-hover:opacity-100" />
       {getFieldIcon(col)}
       <span className="flex-1 truncate">{col.label}</span>
       <div className="invisible group-hover:visible flex gap-0.5">
@@ -421,6 +437,42 @@ function DataSourcePanel({
                 ))}
               </CollapsibleContent>
             </Collapsible>
+
+            {selectedEntities.includes('inventory') && selectedEntities.includes('returns') && (
+              <Collapsible open={relationshipsOpen} onOpenChange={setRelationshipsOpen}>
+                <CollapsibleTrigger className="flex items-center gap-1 w-full text-sm font-medium hover-elevate rounded px-1 py-1">
+                  {relationshipsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  <Layers className="h-4 w-4 text-purple-500" />
+                  Relationships
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pl-6 pt-2 space-y-2">
+                  <div className="text-xs text-muted-foreground mb-2">
+                    Join Inventory and Returns by Serial ID, Area ID, and Item ID
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Join Type</Label>
+                    <Select value={joinType} onValueChange={(v) => onJoinTypeChange(v as 'left' | 'inner' | 'none')}>
+                      <SelectTrigger className="h-8 text-xs" data-testid="select-join-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="left">Left Join (All Inventory)</SelectItem>
+                        <SelectItem value="inner">Inner Join (Only Matches)</SelectItem>
+                        <SelectItem value="none">No Join</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {joinType !== 'none' && (
+                    <div className="text-xs bg-muted p-2 rounded space-y-1">
+                      <div className="font-medium">Join Keys:</div>
+                      <div className="text-muted-foreground">inventory.serial_id = returns.serial_id</div>
+                      <div className="text-muted-foreground">inventory.data_area_id = returns.area_id</div>
+                      <div className="text-muted-foreground">inventory.item_id = returns.item_id</div>
+                    </div>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </div>
         </ScrollArea>
       </CardContent>
@@ -443,6 +495,8 @@ export default function DataTablePage() {
   const [queryName, setQueryName] = useState("");
   const [queryDescription, setQueryDescription] = useState("");
   const [activeView, setActiveView] = useState<'builder' | 'results'>('builder');
+  const [joinType, setJoinType] = useState<'left' | 'inner' | 'none'>('left');
+  const [dragOverZone, setDragOverZone] = useState<string | null>(null);
 
   const { data: columnsData, isLoading: columnsLoading } = useQuery<{
     inventory: QueryColumn[];
@@ -595,8 +649,8 @@ export default function DataTablePage() {
       measures,
       filters,
       sorts,
-      relationships: selectedEntities.includes('returns') && columnsData?.relationships ? 
-        [{ ...columnsData.relationships[0], type: 'left' as const }] : [],
+      relationships: selectedEntities.includes('returns') && columnsData?.relationships && joinType !== 'none' ? 
+        [{ ...columnsData.relationships[0], type: joinType as 'left' | 'inner' }] : [],
       limit,
     };
   };
@@ -798,6 +852,8 @@ export default function DataTablePage() {
             onAddToColumns={addToColumns}
             onAddToValues={addToValues}
             onAddToFilters={addToFilters}
+            joinType={joinType}
+            onJoinTypeChange={setJoinType}
           />
         </div>
 
@@ -809,10 +865,25 @@ export default function DataTablePage() {
                   <Rows3 className="h-4 w-4" />
                   <Label className="text-xs font-medium">Primary Grouping</Label>
                 </div>
-                <div className="min-h-[80px] p-2 border rounded-md bg-muted/30 space-y-1">
+                <div 
+                  className={`min-h-[80px] p-2 border rounded-md space-y-1 transition-colors ${
+                    dragOverZone === 'rows' ? 'bg-primary/10 border-primary' : 'bg-muted/30'
+                  }`}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverZone('rows'); }}
+                  onDragLeave={() => setDragOverZone(null)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOverZone(null);
+                    try {
+                      const col = JSON.parse(e.dataTransfer.getData('application/json')) as QueryColumn;
+                      addToRows(col);
+                    } catch {}
+                  }}
+                  data-testid="dropzone-rows"
+                >
                   {rowFields.length === 0 ? (
                     <p className="text-xs text-muted-foreground text-center py-3">
-                      Main row labels
+                      Drag fields here
                     </p>
                   ) : (
                     rowFields.map(field => (
@@ -835,10 +906,25 @@ export default function DataTablePage() {
                   <Columns className="h-4 w-4" />
                   <Label className="text-xs font-medium">Secondary Grouping</Label>
                 </div>
-                <div className="min-h-[80px] p-2 border rounded-md bg-muted/30 space-y-1">
+                <div 
+                  className={`min-h-[80px] p-2 border rounded-md space-y-1 transition-colors ${
+                    dragOverZone === 'columns' ? 'bg-primary/10 border-primary' : 'bg-muted/30'
+                  }`}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverZone('columns'); }}
+                  onDragLeave={() => setDragOverZone(null)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOverZone(null);
+                    try {
+                      const col = JSON.parse(e.dataTransfer.getData('application/json')) as QueryColumn;
+                      addToColumns(col);
+                    } catch {}
+                  }}
+                  data-testid="dropzone-columns"
+                >
                   {columnFields.length === 0 ? (
                     <p className="text-xs text-muted-foreground text-center py-3">
-                      Additional breakdown
+                      Drag fields here
                     </p>
                   ) : (
                     columnFields.map(field => (
@@ -860,10 +946,29 @@ export default function DataTablePage() {
                   <Hash className="h-4 w-4" />
                   <Label className="text-xs font-medium">Values</Label>
                 </div>
-                <div className="min-h-[80px] p-2 border rounded-md bg-muted/30 space-y-1">
+                <div 
+                  className={`min-h-[80px] p-2 border rounded-md space-y-1 transition-colors ${
+                    dragOverZone === 'values' ? 'bg-primary/10 border-primary' : 'bg-muted/30'
+                  }`}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverZone('values'); }}
+                  onDragLeave={() => setDragOverZone(null)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOverZone(null);
+                    try {
+                      const col = JSON.parse(e.dataTransfer.getData('application/json')) as QueryColumn;
+                      if (col.aggregatable) {
+                        addToValues(col);
+                      } else {
+                        toast({ title: "Cannot add", description: "Only numeric fields can be added to Values", variant: "destructive" });
+                      }
+                    } catch {}
+                  }}
+                  data-testid="dropzone-values"
+                >
                   {valueFields.length === 0 ? (
                     <p className="text-xs text-muted-foreground text-center py-3">
-                      Add measures
+                      Drag numeric fields
                     </p>
                   ) : (
                     valueFields.map(field => (
@@ -886,10 +991,25 @@ export default function DataTablePage() {
                   <Filter className="h-4 w-4" />
                   <Label className="text-xs font-medium">Filters</Label>
                 </div>
-                <div className="min-h-[80px] p-2 border rounded-md bg-muted/30 space-y-1">
+                <div 
+                  className={`min-h-[80px] p-2 border rounded-md space-y-1 transition-colors ${
+                    dragOverZone === 'filters' ? 'bg-primary/10 border-primary' : 'bg-muted/30'
+                  }`}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverZone('filters'); }}
+                  onDragLeave={() => setDragOverZone(null)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOverZone(null);
+                    try {
+                      const col = JSON.parse(e.dataTransfer.getData('application/json')) as QueryColumn;
+                      addToFilters(col);
+                    } catch {}
+                  }}
+                  data-testid="dropzone-filters"
+                >
                   {globalFilters.length === 0 ? (
                     <p className="text-xs text-muted-foreground text-center py-3">
-                      Add filters
+                      Drag fields here
                     </p>
                   ) : (
                     globalFilters.map(field => (
