@@ -574,7 +574,7 @@ function DataSourcePanel({
 
   const ColumnItem = ({ col }: { col: QueryColumn }) => (
     <div 
-      className="group flex items-center gap-1 px-1 py-0.5 rounded text-[11px] hover-elevate cursor-grab active:cursor-grabbing"
+      className="group flex items-center gap-1.5 px-1.5 py-1 rounded text-xs hover-elevate cursor-grab active:cursor-grabbing"
       draggable
       onDragStart={(e) => handleDragStart(e, col)}
       data-testid={`draggable-field-${col.entity}-${col.field}`}
