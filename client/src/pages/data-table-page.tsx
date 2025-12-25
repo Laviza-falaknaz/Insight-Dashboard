@@ -407,13 +407,24 @@ function FieldPill({
       
       {showAggregation && onAggregationChange && (
         <Select value={field.aggregation || 'SUM'} onValueChange={(v) => onAggregationChange(v as AggregationType)}>
-          <SelectTrigger className="h-5 w-14 text-[10px] border-0 bg-transparent px-1">
+          <SelectTrigger className="h-5 w-20 text-[10px] border-0 bg-transparent px-1">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {AGGREGATIONS.map(agg => (
-              <SelectItem key={agg.value} value={agg.value} className="text-xs">{agg.label}</SelectItem>
-            ))}
+            {AGGREGATIONS.map(agg => {
+              const isNumericOnly = ['SUM', 'AVG', 'MIN', 'MAX'].includes(agg.value);
+              const disabled = isNumericOnly && field.type !== 'numeric';
+              return (
+                <SelectItem 
+                  key={agg.value} 
+                  value={agg.value} 
+                  className="text-xs"
+                  disabled={disabled}
+                >
+                  {agg.label}
+                </SelectItem>
+              );
+            })}
           </SelectContent>
         </Select>
       )}
@@ -527,11 +538,9 @@ function DataSourcePanel({
         <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToColumns(col)} title="Add to Columns">
           <Columns className="h-3 w-3" />
         </Button>
-        {col.aggregatable && (
-          <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToValues(col)} title="Add to Values">
-            <Hash className="h-3 w-3" />
-          </Button>
-        )}
+        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToValues(col)} title="Add to Values">
+          <Hash className="h-3 w-3" />
+        </Button>
         <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToFilters(col)} title="Add to Filters">
           <Filter className="h-3 w-3" />
         </Button>
@@ -540,14 +549,14 @@ function DataSourcePanel({
   );
 
   return (
-    <Card className="h-full">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium flex items-center gap-2">
-          <Database className="h-4 w-4" />
+    <div className="h-full py-2">
+      <div className="px-3 pb-3">
+        <h2 className="text-sm font-semibold flex items-center gap-2">
+          <Database className="h-4 w-4 text-muted-foreground" />
           Data Sources
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
+        </h2>
+      </div>
+      <div className="px-3 space-y-3">
         <div className="relative">
           <Search className="absolute left-2 top-2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -644,8 +653,8 @@ function DataSourcePanel({
             )}
           </div>
         </ScrollArea>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -737,7 +746,8 @@ export default function DataTablePage() {
   };
 
   const addToValues = (col: QueryColumn) => {
-    const newField: PivotField = { ...col, id: generateId(), aggregation: 'SUM' };
+    const defaultAgg = col.type === 'numeric' ? 'SUM' : 'COUNT_DISTINCT';
+    const newField: PivotField = { ...col, id: generateId(), aggregation: defaultAgg };
     setValueFields([...valueFields, newField]);
   };
 
@@ -978,22 +988,23 @@ export default function DataTablePage() {
   }
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between p-4 border-b">
+    <div className="h-full flex flex-col bg-background">
+      <div className="flex items-center justify-between px-6 py-4 border-b bg-card/50">
         <div>
-          <h1 className="text-xl font-bold" data-testid="text-page-title">Pivot Table Builder</h1>
-          <p className="text-sm text-muted-foreground">
-            Build dynamic reports like Excel pivot tables
+          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Query Builder</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Create pivot tables and visualizations from your data
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={clearAll} data-testid="button-clear-all">
-            <RefreshCw className="h-4 w-4 mr-1" />
-            Clear
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={clearAll} data-testid="button-clear-all">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Reset
           </Button>
           <Button 
             onClick={executeQuery} 
             disabled={executeMutation.isPending}
+            size="default"
             data-testid="button-execute-query"
           >
             {executeMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
@@ -1012,7 +1023,7 @@ export default function DataTablePage() {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="w-64 border-r p-3 overflow-auto">
+        <div className="w-72 border-r bg-muted/20 overflow-auto">
           <DataSourcePanel
             columnsData={columnsData}
             selectedEntities={selectedEntities}
@@ -1027,8 +1038,8 @@ export default function DataTablePage() {
         </div>
 
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="border-b p-3 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="border-b p-4 bg-card/30">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Rows3 className="h-4 w-4" />
@@ -1036,8 +1047,8 @@ export default function DataTablePage() {
                   <span className="text-[10px] text-muted-foreground">(Group by)</span>
                 </div>
                 <div 
-                  className={`min-h-[80px] p-2 border rounded-md space-y-1 transition-colors ${
-                    dragOverZone === 'rows' ? 'bg-primary/10 border-primary' : 'bg-muted/30'
+                  className={`min-h-[80px] p-3 border-2 border-dashed rounded-lg space-y-1.5 transition-colors ${
+                    dragOverZone === 'rows' ? 'bg-primary/10 border-primary' : 'bg-background/50 border-muted-foreground/20'
                   }`}
                   onDragOver={(e) => { e.preventDefault(); setDragOverZone('rows'); }}
                   onDragLeave={() => setDragOverZone(null)}
@@ -1079,8 +1090,8 @@ export default function DataTablePage() {
                   <span className="text-[10px] text-muted-foreground">(Split by)</span>
                 </div>
                 <div 
-                  className={`min-h-[80px] p-2 border rounded-md space-y-1 transition-colors ${
-                    dragOverZone === 'columns' ? 'bg-primary/10 border-primary' : 'bg-muted/30'
+                  className={`min-h-[80px] p-3 border-2 border-dashed rounded-lg space-y-1.5 transition-colors ${
+                    dragOverZone === 'columns' ? 'bg-primary/10 border-primary' : 'bg-background/50 border-muted-foreground/20'
                   }`}
                   onDragOver={(e) => { e.preventDefault(); setDragOverZone('columns'); }}
                   onDragLeave={() => setDragOverZone(null)}
@@ -1121,8 +1132,8 @@ export default function DataTablePage() {
                   <span className="text-[10px] text-muted-foreground">(Sum/Count)</span>
                 </div>
                 <div 
-                  className={`min-h-[80px] p-2 border rounded-md space-y-1 transition-colors ${
-                    dragOverZone === 'values' ? 'bg-primary/10 border-primary' : 'bg-muted/30'
+                  className={`min-h-[80px] p-3 border-2 border-dashed rounded-lg space-y-1.5 transition-colors ${
+                    dragOverZone === 'values' ? 'bg-primary/10 border-primary' : 'bg-background/50 border-muted-foreground/20'
                   }`}
                   onDragOver={(e) => { e.preventDefault(); setDragOverZone('values'); }}
                   onDragLeave={() => setDragOverZone(null)}
@@ -1131,18 +1142,14 @@ export default function DataTablePage() {
                     setDragOverZone(null);
                     try {
                       const col = JSON.parse(e.dataTransfer.getData('application/json')) as QueryColumn;
-                      if (col.aggregatable) {
-                        addToValues(col);
-                      } else {
-                        toast({ title: "Cannot add", description: "Only numeric fields can be added to Values", variant: "destructive" });
-                      }
+                      addToValues(col);
                     } catch {}
                   }}
                   data-testid="dropzone-values"
                 >
                   {valueFields.length === 0 ? (
                     <p className="text-xs text-muted-foreground text-center py-3">
-                      Drag numeric fields
+                      Drag any field (numeric or text)
                     </p>
                   ) : (
                     valueFields.map(field => (
@@ -1167,8 +1174,8 @@ export default function DataTablePage() {
                   <span className="text-[10px] text-muted-foreground">(Limit data)</span>
                 </div>
                 <div 
-                  className={`min-h-[80px] p-2 border rounded-md space-y-1 transition-colors ${
-                    dragOverZone === 'filters' ? 'bg-primary/10 border-primary' : 'bg-muted/30'
+                  className={`min-h-[80px] p-3 border-2 border-dashed rounded-lg space-y-1.5 transition-colors ${
+                    dragOverZone === 'filters' ? 'bg-primary/10 border-primary' : 'bg-background/50 border-muted-foreground/20'
                   }`}
                   onDragOver={(e) => { e.preventDefault(); setDragOverZone('filters'); }}
                   onDragLeave={() => setDragOverZone(null)}
