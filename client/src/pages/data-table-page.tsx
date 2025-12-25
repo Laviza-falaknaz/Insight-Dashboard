@@ -562,7 +562,7 @@ export default function DataTablePage() {
       case 'bar':
         return (
           <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 100 }}>
+            <BarChart data={chartData} margin={{ top: 40, right: 30, left: 20, bottom: 100 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
               <XAxis dataKey={xAxisKey} tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={100} />
               <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => formatValue(v, 'numeric')} />
@@ -578,7 +578,7 @@ export default function DataTablePage() {
       case 'line':
         return (
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 100 }}>
+            <LineChart data={chartData} margin={{ top: 40, right: 30, left: 20, bottom: 100 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
               <XAxis dataKey={xAxisKey} tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={100} />
               <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => formatValue(v, 'numeric')} />
@@ -594,7 +594,7 @@ export default function DataTablePage() {
       case 'area':
         return (
           <ResponsiveContainer width="100%" height={400}>
-            <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 100 }}>
+            <AreaChart data={chartData} margin={{ top: 40, right: 30, left: 20, bottom: 100 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
               <XAxis dataKey={xAxisKey} tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={100} />
               <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => formatValue(v, 'numeric')} />
@@ -1245,7 +1245,7 @@ export default function DataTablePage() {
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm">Query Results</CardTitle>
                   </CardHeader>
-                  <CardContent className="pt-4">
+                  <CardContent className="pt-6 pb-4">
                     {renderChart()}
                   </CardContent>
                 </Card>
