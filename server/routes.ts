@@ -319,7 +319,12 @@ export async function registerRoutes(
   // Admin: Create join key
   app.post("/api/admin/join-keys", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { sourceEntityId, targetEntityId, name, sourceField, targetField, isDefault, supportedJoinTypes } = req.body;
+      const { sourceEntityId, targetEntityId, name, fieldPairs, bidirectional, isDefault, supportedJoinTypes } = req.body;
+      
+      // Validate fieldPairs
+      if (!fieldPairs || !Array.isArray(fieldPairs) || fieldPairs.length === 0) {
+        return res.status(400).json({ error: "At least one field pair is required" });
+      }
       
       // If this is default, unset other defaults for this pair
       if (isDefault) {
@@ -334,14 +339,19 @@ export async function registerRoutes(
           );
       }
       
+      // Use first pair for legacy sourceField/targetField columns
+      const firstPair = fieldPairs[0];
+      
       const created = await db
         .insert(entityJoinKeys)
         .values({ 
           sourceEntityId, 
           targetEntityId, 
           name, 
-          sourceField, 
-          targetField, 
+          sourceField: firstPair.sourceField,
+          targetField: firstPair.targetField,
+          fieldPairs: fieldPairs,
+          bidirectional: bidirectional || false,
           isDefault: isDefault ? 'true' : 'false',
           supportedJoinTypes: supportedJoinTypes || 'inner,left,right'
         })
@@ -349,6 +359,7 @@ export async function registerRoutes(
       
       res.json(created[0]);
     } catch (error) {
+      console.error("Failed to create join key:", error);
       res.status(500).json({ error: "Failed to create join key" });
     }
   });
@@ -357,7 +368,7 @@ export async function registerRoutes(
   app.put("/api/admin/join-keys/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const { name, sourceField, targetField, isDefault, supportedJoinTypes } = req.body;
+      const { name, fieldPairs, bidirectional, isDefault, supportedJoinTypes } = req.body;
       
       // If setting as default, unset others
       if (isDefault) {
@@ -375,15 +386,27 @@ export async function registerRoutes(
         }
       }
       
+      const updateData: Record<string, unknown> = { 
+        name, 
+        isDefault: isDefault ? 'true' : 'false',
+        supportedJoinTypes 
+      };
+      
+      // Handle fieldPairs if provided
+      if (fieldPairs && Array.isArray(fieldPairs) && fieldPairs.length > 0) {
+        updateData.fieldPairs = fieldPairs;
+        updateData.sourceField = fieldPairs[0].sourceField;
+        updateData.targetField = fieldPairs[0].targetField;
+      }
+      
+      // Handle bidirectional if provided
+      if (bidirectional !== undefined) {
+        updateData.bidirectional = bidirectional;
+      }
+      
       const updated = await db
         .update(entityJoinKeys)
-        .set({ 
-          name, 
-          sourceField, 
-          targetField, 
-          isDefault: isDefault ? 'true' : 'false',
-          supportedJoinTypes 
-        })
+        .set(updateData)
         .where(eq(entityJoinKeys.id, parseInt(id)))
         .returning();
       
@@ -392,6 +415,7 @@ export async function registerRoutes(
       }
       res.json(updated[0]);
     } catch (error) {
+      console.error("Failed to update join key:", error);
       res.status(500).json({ error: "Failed to update join key" });
     }
   });
