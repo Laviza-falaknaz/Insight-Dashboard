@@ -514,7 +514,11 @@ export default function DataTablePage() {
   };
 
   const formatColumnName = (field: string): string => {
-    return field.toUpperCase().replace(/_/g, ' ');
+    // Handle both camelCase and snake_case
+    // First convert camelCase to spaces: "relatedOrderName" -> "related Order Name"
+    const withSpaces = field.replace(/([a-z])([A-Z])/g, '$1 $2');
+    // Then replace underscores with spaces and convert to uppercase
+    return withSpaces.replace(/_/g, ' ').toUpperCase();
   };
 
   if (columnsLoading) {

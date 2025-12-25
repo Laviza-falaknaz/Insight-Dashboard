@@ -4187,6 +4187,14 @@ Be specific with numbers and percentages when available. Prioritize actionable r
           'dispatchDate': 'dispatch_date',
           'serialId': 'serial_id',
           'areaId': 'area_id',
+          'relatedOrderName': 'related_order_name',
+          'finalResellerName': 'final_reseller_name',
+          'finalDistributorName': 'final_distributor_name',
+          'opportunityNumber': 'opportunity_number',
+          'caseId': 'case_id',
+          'rmaLineName': 'rma_line_name',
+          'rmaLineStatus': 'rma_line_status',
+          'rmaLineSolution': 'rma_line_solution',
         };
         const prefix = entity === 'inventory' ? 'i' : 'r';
         return `${prefix}.${mapping[field] || field.toLowerCase()}`;
