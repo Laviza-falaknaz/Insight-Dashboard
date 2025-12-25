@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { 
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, 
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell 
@@ -182,6 +183,151 @@ interface RelationshipMeta {
   defaultJoinType: JoinType;
   supportedJoinTypes: JoinType[];
   joinFields?: Array<{ from: string; to: string }>;
+}
+
+interface MultiSelectFilterProps {
+  entity: QueryEntity;
+  field: string;
+  value: string;
+  onChange: (value: string) => void;
+  operator: 'in' | 'not_in';
+}
+
+function MultiSelectFilter({ entity, field, value, onChange, operator }: MultiSelectFilterProps) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [selectedValues, setSelectedValues] = useState<Set<string>>(new Set());
+  
+  const { data: valuesData, isLoading } = useQuery<{ values: Array<{ value: string; count: number }> }>({
+    queryKey: ['/api/query-builder/column-values', entity, field],
+    queryFn: async () => {
+      const res = await fetch('/api/query-builder/column-values', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ entity, field, limit: 500 })
+      });
+      if (!res.ok) throw new Error('Failed to fetch values');
+      return res.json();
+    },
+    enabled: open,
+  });
+  
+  useEffect(() => {
+    if (value) {
+      const vals = value.split(',').map(v => v.trim()).filter(v => v);
+      setSelectedValues(new Set(vals));
+    } else {
+      setSelectedValues(new Set());
+    }
+  }, [value]);
+  
+  const allValues = valuesData?.values || [];
+  const filteredValues = search 
+    ? allValues.filter(v => v.value?.toLowerCase().includes(search.toLowerCase()))
+    : allValues;
+  
+  const toggleValue = (val: string) => {
+    const newSet = new Set(selectedValues);
+    if (newSet.has(val)) {
+      newSet.delete(val);
+    } else {
+      newSet.add(val);
+    }
+    setSelectedValues(newSet);
+    onChange(Array.from(newSet).join(', '));
+  };
+  
+  const selectAllFiltered = () => {
+    const newSet = new Set(selectedValues);
+    filteredValues.forEach(v => {
+      if (v.value) newSet.add(v.value);
+    });
+    setSelectedValues(newSet);
+    onChange(Array.from(newSet).join(', '));
+  };
+  
+  const deselectAllFiltered = () => {
+    const newSet = new Set(selectedValues);
+    filteredValues.forEach(v => {
+      if (v.value) newSet.delete(v.value);
+    });
+    setSelectedValues(newSet);
+    onChange(Array.from(newSet).join(', '));
+  };
+  
+  const selectedCount = selectedValues.size;
+  
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 text-xs flex-1 justify-start font-normal">
+          {selectedCount > 0 ? (
+            <span className="truncate">
+              {selectedCount} value{selectedCount !== 1 ? 's' : ''} selected
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Select values...</span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-0" align="start">
+        <div className="p-2 border-b">
+          <div className="flex items-center gap-1 mb-2">
+            <Search className="h-3 w-3 text-muted-foreground" />
+            <Input 
+              placeholder="Search values..." 
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-7 text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="sm" className="h-6 text-xs flex-1" onClick={selectAllFiltered}>
+              Select{search ? ' filtered' : ' all'}
+            </Button>
+            <Button variant="outline" size="sm" className="h-6 text-xs flex-1" onClick={deselectAllFiltered}>
+              Deselect{search ? ' filtered' : ' all'}
+            </Button>
+          </div>
+        </div>
+        <ScrollArea className="h-60">
+          <div className="p-2 space-y-1">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-xs text-muted-foreground">Loading values...</span>
+              </div>
+            ) : filteredValues.length === 0 ? (
+              <div className="text-center py-4 text-xs text-muted-foreground">
+                {search ? 'No matching values' : 'No values available'}
+              </div>
+            ) : (
+              filteredValues.map((item, idx) => (
+                <div 
+                  key={idx} 
+                  className="flex items-center gap-2 px-2 py-1 rounded hover-elevate cursor-pointer"
+                  onClick={() => item.value && toggleValue(item.value)}
+                >
+                  <Checkbox 
+                    checked={item.value ? selectedValues.has(item.value) : false}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span className="text-xs flex-1 truncate">{item.value || '(empty)'}</span>
+                  <Badge variant="secondary" className="text-xs h-4 px-1">{item.count}</Badge>
+                </div>
+              ))
+            )}
+          </div>
+        </ScrollArea>
+        {selectedCount > 0 && (
+          <div className="p-2 border-t bg-muted/30 text-xs text-muted-foreground">
+            {selectedCount} value{selectedCount !== 1 ? 's' : ''} {operator === 'in' ? 'included' : 'excluded'}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export default function DataTablePage() {
@@ -1075,11 +1221,12 @@ export default function DataTablePage() {
                                 />
                               </div>
                             ) : ['in', 'not_in'].includes(filter.operator) ? (
-                              <Input 
+                              <MultiSelectFilter
+                                entity={filter.entity}
+                                field={filter.field}
                                 value={filter.value}
-                                onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
-                                placeholder="value1, value2, value3..."
-                                className="h-7 text-xs flex-1"
+                                onChange={(v) => updateFilter(filter.id, { value: v })}
+                                operator={filter.operator as 'in' | 'not_in'}
                               />
                             ) : (
                               <Input 
