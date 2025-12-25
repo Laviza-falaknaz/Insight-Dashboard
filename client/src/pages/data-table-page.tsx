@@ -708,11 +708,19 @@ export default function DataTablePage() {
                               const preset = relationships.find(r => r.id === v);
                               if (preset) {
                                 const isBidirectionalSwapped = preset.bidirectional && preset.targetEntity === primaryEntity;
-                                setJoinConditions([{
-                                  leftField: isBidirectionalSwapped ? preset.targetField : preset.sourceField,
-                                  rightField: isBidirectionalSwapped ? preset.sourceField : preset.targetField,
-                                  comparator: '='
-                                }]);
+                                
+                                // Use joinFields if available (multi-field support), otherwise fall back to single field
+                                const fields = preset.joinFields && preset.joinFields.length > 0
+                                  ? preset.joinFields
+                                  : [{ from: preset.sourceField, to: preset.targetField }];
+                                
+                                const conditions = fields.map(f => ({
+                                  leftField: isBidirectionalSwapped ? f.to : f.from,
+                                  rightField: isBidirectionalSwapped ? f.from : f.to,
+                                  comparator: '=' as const
+                                }));
+                                
+                                setJoinConditions(conditions);
                                 setJoinType(preset.defaultJoinType);
                               }
                             }

@@ -4169,18 +4169,26 @@ Be specific with numbers and percentages when available. Prioritize actionable r
     
     // Build relationships/join keys from database
     const relationships = joinKeysData.length > 0
-      ? joinKeysData.map(jk => ({
-          id: `${jk.sourceEntityId}-${jk.targetEntityId}-${jk.id}`,
-          sourceEntity: jk.sourceEntityId,
-          targetEntity: jk.targetEntityId,
-          sourceField: jk.sourceField,
-          targetField: jk.targetField,
-          label: jk.name,
-          bidirectional: true,
-          isDefault: jk.isDefault === 'true',
-          defaultJoinType: 'left' as const,
-          supportedJoinTypes: (jk.supportedJoinTypes || 'inner,left,right').split(',') as ('inner' | 'left' | 'right' | 'first' | 'exists')[]
-        }))
+      ? joinKeysData.map(jk => {
+          // Use fieldPairs if available, otherwise fall back to legacy fields
+          const pairs = jk.fieldPairs && Array.isArray(jk.fieldPairs) && jk.fieldPairs.length > 0
+            ? jk.fieldPairs
+            : [{ sourceField: jk.sourceField, targetField: jk.targetField }];
+          
+          return {
+            id: `${jk.sourceEntityId}-${jk.targetEntityId}-${jk.id}`,
+            sourceEntity: jk.sourceEntityId,
+            targetEntity: jk.targetEntityId,
+            sourceField: pairs[0].sourceField,
+            targetField: pairs[0].targetField,
+            joinFields: pairs.map(p => ({ from: p.sourceField, to: p.targetField })),
+            label: jk.name,
+            bidirectional: jk.bidirectional || false,
+            isDefault: jk.isDefault === 'true',
+            defaultJoinType: 'left' as const,
+            supportedJoinTypes: (jk.supportedJoinTypes || 'inner,left,right').split(',') as ('inner' | 'left' | 'right' | 'first' | 'exists')[]
+          };
+        })
       : [
           {
             id: 'inventory-returns',
@@ -4188,6 +4196,7 @@ Be specific with numbers and percentages when available. Prioritize actionable r
             targetEntity: 'returns',
             sourceField: 'inventSerialId',
             targetField: 'serialId',
+            joinFields: [{ from: 'inventSerialId', to: 'serialId' }],
             label: 'Serial Number Link',
             bidirectional: true,
             isDefault: true,

@@ -22,6 +22,11 @@ interface EntityConfig {
   color: string | null;
 }
 
+interface FieldPair {
+  sourceField: string;
+  targetField: string;
+}
+
 interface JoinKey {
   id: number;
   sourceEntityId: string;
@@ -29,8 +34,17 @@ interface JoinKey {
   name: string;
   sourceField: string;
   targetField: string;
+  fieldPairs: FieldPair[] | null;
+  bidirectional: boolean | null;
   isDefault: string;
   supportedJoinTypes: string | null;
+}
+
+interface QueryColumn {
+  entity: string;
+  field: string;
+  label: string;
+  type: string;
 }
 
 interface RefreshStatus {
@@ -320,14 +334,23 @@ function EntityConfigManager() {
     sourceEntityId: "",
     targetEntityId: "",
     name: "",
-    sourceField: "",
-    targetField: "",
+    fieldPairs: [{ sourceField: "", targetField: "" }] as FieldPair[],
+    bidirectional: false,
     isDefault: false
   });
 
   const { data: adminData, isLoading } = useQuery<{ entities: EntityConfig[], joinKeys: JoinKey[] }>({
     queryKey: ["/api/admin/entities"],
   });
+
+  const { data: columnsData } = useQuery<{ columns: QueryColumn[] }>({
+    queryKey: ["/api/query-builder/columns"],
+  });
+
+  const getColumnsForEntity = (entityId: string) => {
+    if (!columnsData?.columns) return [];
+    return columnsData.columns.filter(c => c.entity === entityId);
+  };
 
   const toggleVisibilityMutation = useMutation({
     mutationFn: async ({ entityId, isVisible }: { entityId: string, isVisible: boolean }) => {
@@ -350,17 +373,53 @@ function EntityConfigManager() {
   const createJoinKeyMutation = useMutation({
     mutationFn: async (data: typeof newJoinKey) => {
       return apiRequest("POST", "/api/admin/join-keys", {
-        ...data,
+        sourceEntityId: data.sourceEntityId,
+        targetEntityId: data.targetEntityId,
+        name: data.name,
+        fieldPairs: data.fieldPairs,
+        bidirectional: data.bidirectional,
+        isDefault: data.isDefault,
         supportedJoinTypes: "inner,left,right"
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/entities"] });
       queryClient.invalidateQueries({ queryKey: ["/api/query-builder/columns"] });
-      setNewJoinKey({ sourceEntityId: "", targetEntityId: "", name: "", sourceField: "", targetField: "", isDefault: false });
+      setNewJoinKey({ 
+        sourceEntityId: "", 
+        targetEntityId: "", 
+        name: "", 
+        fieldPairs: [{ sourceField: "", targetField: "" }],
+        bidirectional: false,
+        isDefault: false 
+      });
       toast({ title: "Created", description: "Join key created successfully" });
     }
   });
+
+  const addFieldPair = () => {
+    setNewJoinKey(prev => ({
+      ...prev,
+      fieldPairs: [...prev.fieldPairs, { sourceField: "", targetField: "" }]
+    }));
+  };
+
+  const removeFieldPair = (index: number) => {
+    if (newJoinKey.fieldPairs.length <= 1) return;
+    setNewJoinKey(prev => ({
+      ...prev,
+      fieldPairs: prev.fieldPairs.filter((_, i) => i !== index)
+    }));
+  };
+
+  const updateFieldPair = (index: number, field: 'sourceField' | 'targetField', value: string) => {
+    setNewJoinKey(prev => ({
+      ...prev,
+      fieldPairs: prev.fieldPairs.map((pair, i) => 
+        i === index ? { ...pair, [field]: value } : pair
+      )
+    }));
+  };
 
   const setDefaultMutation = useMutation({
     mutationFn: async ({ id, isDefault }: { id: number, isDefault: boolean }) => {
@@ -469,7 +528,14 @@ function EntityConfigManager() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label className="text-xs">Source Entity</Label>
-                  <Select value={newJoinKey.sourceEntityId} onValueChange={(v) => setNewJoinKey(prev => ({ ...prev, sourceEntityId: v }))}>
+                  <Select 
+                    value={newJoinKey.sourceEntityId} 
+                    onValueChange={(v) => setNewJoinKey(prev => ({ 
+                      ...prev, 
+                      sourceEntityId: v,
+                      fieldPairs: prev.fieldPairs.map(p => ({ ...p, sourceField: "" }))
+                    }))}
+                  >
                     <SelectTrigger data-testid="select-source-entity">
                       <SelectValue placeholder="Select source" />
                     </SelectTrigger>
@@ -482,7 +548,14 @@ function EntityConfigManager() {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Target Entity</Label>
-                  <Select value={newJoinKey.targetEntityId} onValueChange={(v) => setNewJoinKey(prev => ({ ...prev, targetEntityId: v }))}>
+                  <Select 
+                    value={newJoinKey.targetEntityId} 
+                    onValueChange={(v) => setNewJoinKey(prev => ({ 
+                      ...prev, 
+                      targetEntityId: v,
+                      fieldPairs: prev.fieldPairs.map(p => ({ ...p, targetField: "" }))
+                    }))}
+                  >
                     <SelectTrigger data-testid="select-target-entity">
                       <SelectValue placeholder="Select target" />
                     </SelectTrigger>
@@ -493,47 +566,110 @@ function EntityConfigManager() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Source Field</Label>
-                  <Input
-                    placeholder="e.g. inventSerialId"
-                    value={newJoinKey.sourceField}
-                    onChange={(e) => setNewJoinKey(prev => ({ ...prev, sourceField: e.target.value }))}
-                    data-testid="input-source-field"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Target Field</Label>
-                  <Input
-                    placeholder="e.g. serialId"
-                    value={newJoinKey.targetField}
-                    onChange={(e) => setNewJoinKey(prev => ({ ...prev, targetField: e.target.value }))}
-                    data-testid="input-target-field"
-                  />
-                </div>
-                <div className="col-span-2 space-y-1">
-                  <Label className="text-xs">Join Key Name</Label>
-                  <Input
-                    placeholder="e.g. Serial ID Match"
-                    value={newJoinKey.name}
-                    onChange={(e) => setNewJoinKey(prev => ({ ...prev, name: e.target.value }))}
-                    data-testid="input-join-key-name"
-                  />
-                </div>
               </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">Field Mappings</Label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={addFieldPair}
+                    disabled={!newJoinKey.sourceEntityId || !newJoinKey.targetEntityId}
+                    data-testid="button-add-field-pair"
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Add Field
+                  </Button>
+                </div>
+                
+                {newJoinKey.fieldPairs.map((pair, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <Select 
+                        value={pair.sourceField} 
+                        onValueChange={(v) => updateFieldPair(index, 'sourceField', v)}
+                        disabled={!newJoinKey.sourceEntityId}
+                      >
+                        <SelectTrigger className="h-8 text-sm" data-testid={`select-source-field-${index}`}>
+                          <SelectValue placeholder="Source field" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {getColumnsForEntity(newJoinKey.sourceEntityId).map(col => (
+                            <SelectItem key={col.field} value={col.field}>{col.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <span className="text-muted-foreground">=</span>
+                    <div className="flex-1">
+                      <Select 
+                        value={pair.targetField} 
+                        onValueChange={(v) => updateFieldPair(index, 'targetField', v)}
+                        disabled={!newJoinKey.targetEntityId}
+                      >
+                        <SelectTrigger className="h-8 text-sm" data-testid={`select-target-field-${index}`}>
+                          <SelectValue placeholder="Target field" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {getColumnsForEntity(newJoinKey.targetEntityId).map(col => (
+                            <SelectItem key={col.field} value={col.field}>{col.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {newJoinKey.fieldPairs.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeFieldPair(index)}
+                        data-testid={`button-remove-field-pair-${index}`}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Join Key Name</Label>
+                <Input
+                  placeholder="e.g. Serial ID Match"
+                  value={newJoinKey.name}
+                  onChange={(e) => setNewJoinKey(prev => ({ ...prev, name: e.target.value }))}
+                  data-testid="input-join-key-name"
+                />
+              </div>
+
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={newJoinKey.isDefault}
-                    onCheckedChange={(checked) => setNewJoinKey(prev => ({ ...prev, isDefault: checked }))}
-                    data-testid="switch-new-default"
-                  />
-                  <Label className="text-xs">Set as default</Label>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={newJoinKey.bidirectional}
+                      onCheckedChange={(checked) => setNewJoinKey(prev => ({ ...prev, bidirectional: checked }))}
+                      data-testid="switch-bidirectional"
+                    />
+                    <Label className="text-xs">Bidirectional</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={newJoinKey.isDefault}
+                      onCheckedChange={(checked) => setNewJoinKey(prev => ({ ...prev, isDefault: checked }))}
+                      data-testid="switch-new-default"
+                    />
+                    <Label className="text-xs">Set as default</Label>
+                  </div>
                 </div>
                 <Button
                   size="sm"
                   onClick={() => createJoinKeyMutation.mutate(newJoinKey)}
-                  disabled={!newJoinKey.sourceEntityId || !newJoinKey.targetEntityId || !newJoinKey.name || !newJoinKey.sourceField || !newJoinKey.targetField}
+                  disabled={
+                    !newJoinKey.sourceEntityId || 
+                    !newJoinKey.targetEntityId || 
+                    !newJoinKey.name || 
+                    newJoinKey.fieldPairs.some(p => !p.sourceField || !p.targetField)
+                  }
                   data-testid="button-add-join-key"
                 >
                   <Plus className="h-3 w-3 mr-1" />
@@ -546,46 +682,59 @@ function EntityConfigManager() {
               <p className="text-sm text-muted-foreground text-center py-4">No join keys configured</p>
             ) : (
               <div className="space-y-2">
-                {joinKeys.map((jk) => (
-                  <div
-                    key={jk.id}
-                    className="flex items-center justify-between gap-2 p-3 rounded-md bg-muted/30 flex-wrap"
-                    data-testid={`joinkey-row-${jk.id}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Link2 className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium text-sm">{jk.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {jk.sourceEntityId}.{jk.sourceField} = {jk.targetEntityId}.{jk.targetField}
-                        </p>
+                {joinKeys.map((jk) => {
+                  const pairs = jk.fieldPairs || [{ sourceField: jk.sourceField, targetField: jk.targetField }];
+                  return (
+                    <div
+                      key={jk.id}
+                      className="flex items-center justify-between gap-2 p-3 rounded-md bg-muted/30 flex-wrap"
+                      data-testid={`joinkey-row-${jk.id}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Link2 className="h-4 w-4 text-muted-foreground" />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-sm">{jk.name}</p>
+                            {jk.bidirectional && (
+                              <Badge variant="outline" className="text-xs">Bidirectional</Badge>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {pairs.map((pair, idx) => (
+                              <span key={idx}>
+                                {idx > 0 && ' AND '}
+                                {jk.sourceEntityId}.{pair.sourceField} = {jk.targetEntityId}.{pair.targetField}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {jk.isDefault === 'true' && (
-                        <Badge variant="default" className="text-xs">Default</Badge>
-                      )}
-                      {jk.isDefault !== 'true' && (
+                      <div className="flex items-center gap-2">
+                        {jk.isDefault === 'true' && (
+                          <Badge variant="default" className="text-xs">Default</Badge>
+                        )}
+                        {jk.isDefault !== 'true' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDefaultMutation.mutate({ id: jk.id, isDefault: true })}
+                            data-testid={`button-set-default-${jk.id}`}
+                          >
+                            Set Default
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
-                          size="sm"
-                          onClick={() => setDefaultMutation.mutate({ id: jk.id, isDefault: true })}
-                          data-testid={`button-set-default-${jk.id}`}
+                          size="icon"
+                          onClick={() => deleteJoinKeyMutation.mutate(jk.id)}
+                          data-testid={`button-delete-joinkey-${jk.id}`}
                         >
-                          Set Default
+                          <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => deleteJoinKeyMutation.mutate(jk.id)}
-                        data-testid={`button-delete-joinkey-${jk.id}`}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </TabsContent>
