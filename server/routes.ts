@@ -3961,13 +3961,21 @@ Be specific with numbers and percentages when available. Prioritize actionable r
     res.json({
       inventory: inventoryColumns,
       returns: returnsColumns,
+      entities: [
+        { id: 'inventory', name: 'Inventory', description: 'Main inventory and sales data', icon: 'Package', color: '#3b82f6' },
+        { id: 'returns', name: 'Returns', description: 'Return and warranty claims', icon: 'RotateCcw', color: '#f59e0b' },
+      ],
       relationships: [
         {
-          fromEntity: 'inventory',
-          fromField: 'inventSerialId',
-          toEntity: 'returns',
-          toField: 'serialId',
-          label: 'Inventory to Returns (by Serial ID)',
+          id: 'inventory-returns',
+          sourceEntity: 'inventory',
+          targetEntity: 'returns',
+          sourceField: 'inventSerialId',
+          targetField: 'serialId',
+          label: 'Serial Number Link',
+          bidirectional: true,
+          defaultJoinType: 'left',
+          supportedJoinTypes: ['inner', 'left', 'right', 'first', 'exists'],
           joinFields: [
             { from: 'inventSerialId', to: 'serialId' },
             { from: 'dataAreaId', to: 'areaId' },
