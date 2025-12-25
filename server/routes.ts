@@ -3910,6 +3910,94 @@ Be specific with numbers and percentages when available. Prioritize actionable r
     });
   });
 
+  // Get distinct values for a column (for filter dropdowns)
+  app.post("/api/query-builder/column-values", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { entity, field, search, limit: maxLimit = 100 } = req.body;
+      
+      // Validate entity - whitelist only allowed values
+      if (!['inventory', 'returns'].includes(entity)) {
+        return res.status(400).json({ error: "Invalid entity" });
+      }
+      
+      // Whitelist of allowed fields per entity
+      const allowedFields: Record<string, string[]> = {
+        inventory: [
+          'category', 'make', 'modelNum', 'invoicingName', 'vendName', 'gradeCondition',
+          'status', 'transType', 'segregation', 'processor', 'ram', 'hdd',
+          'invoiceDate', 'salesOrderDate', 'purchDate'
+        ],
+        returns: [
+          'rmaNumber', 'rmaStatus', 'reasonForReturn', 'lineStatus', 'lineSolution',
+          'finalCustomer', 'caseCustomer', 'typeOfUnit', 'createdOn', 'itemReceivedDate', 'dispatchDate'
+        ]
+      };
+      
+      if (!allowedFields[entity]?.includes(field)) {
+        return res.status(400).json({ error: "Invalid field" });
+      }
+      
+      const fieldToColumn: Record<string, string> = {
+        'finalSalesPriceUSD': 'final_sales_price_usd',
+        'finalTotalCostUSD': 'final_total_cost_usd',
+        'purchPriceUSD': 'purch_price_usd',
+        'partsCostUSD': 'parts_cost_usd',
+        'freightChargesUSD': 'freight_charges_usd',
+        'resourceCostUSD': 'resource_cost_usd',
+        'invoicingName': 'invoicing_name',
+        'vendName': 'vend_name',
+        'gradeCondition': 'grade_condition',
+        'transType': 'trans_type',
+        'modelNum': 'model_num',
+        'invoiceDate': 'invoice_date',
+        'salesOrderDate': 'sales_order_date',
+        'purchDate': 'purch_date',
+        'rmaNumber': 'rma_number',
+        'rmaStatus': 'rma_status',
+        'reasonForReturn': 'reason_for_return',
+        'lineStatus': 'line_status',
+        'lineSolution': 'line_solution',
+        'finalCustomer': 'final_customer',
+        'caseCustomer': 'case_customer',
+        'typeOfUnit': 'type_of_unit',
+        'createdOn': 'created_on',
+        'itemReceivedDate': 'item_received_date',
+        'dispatchDate': 'dispatch_date',
+      };
+      
+      const table = entity === 'returns' ? 'returns' : 'inventory';
+      const column = fieldToColumn[field] || field.toLowerCase().replace(/[^a-z0-9_]/g, '');
+      
+      // Sanitize limit
+      const safeLimit = Math.min(Math.max(1, parseInt(String(maxLimit)) || 100), 500);
+      
+      let query = `
+        SELECT DISTINCT ${column}::text as value, COUNT(*)::int as count
+        FROM ${table}
+        WHERE ${column} IS NOT NULL AND ${column}::text != ''
+      `;
+      
+      if (search && typeof search === 'string') {
+        // Safely escape the search term
+        const safeSearch = search.replace(/'/g, "''").substring(0, 100);
+        query += ` AND LOWER(${column}::text) LIKE LOWER('%${safeSearch}%')`;
+      }
+      
+      query += ` GROUP BY ${column} ORDER BY count DESC LIMIT ${safeLimit}`;
+      
+      const result = await db.execute(sql.raw(query));
+      
+      res.json({
+        field,
+        entity,
+        values: (result.rows as any[]).map(r => ({ value: r.value, count: r.count }))
+      });
+    } catch (error) {
+      console.error("Error fetching column values:", error);
+      res.status(500).json({ error: "Failed to fetch column values" });
+    }
+  });
+
   // Execute dynamic query from query builder
   app.post("/api/query-builder/execute", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -3958,11 +4046,25 @@ Be specific with numbers and percentages when available. Prioritize actionable r
         return `${prefix}.${mapping[field] || field.toLowerCase()}`;
       };
 
-      // Add dimensions to SELECT and GROUP BY
+      // Track row and column dimension aliases for pivoting
+      const rowDimensionAliases: string[] = [];
+      const columnDimensionAliases: string[] = [];
+
+      // Add row dimensions to SELECT and GROUP BY
       for (const dim of config.dimensions) {
         const colRef = fieldToColumn(dim.column.entity, dim.column.field);
         selectParts.push(`UPPER(COALESCE(${colRef}::text, 'Unknown')) as "${dim.alias}"`);
         groupByParts.push(`UPPER(COALESCE(${colRef}::text, 'Unknown'))`);
+        rowDimensionAliases.push(dim.alias);
+      }
+
+      // Add column dimensions to SELECT and GROUP BY (for pivoting)
+      const columnDimensions = config.columnDimensions || [];
+      for (const dim of columnDimensions) {
+        const colRef = fieldToColumn(dim.column.entity, dim.column.field);
+        selectParts.push(`UPPER(COALESCE(${colRef}::text, 'Unknown')) as "${dim.alias}"`);
+        groupByParts.push(`UPPER(COALESCE(${colRef}::text, 'Unknown'))`);
+        columnDimensionAliases.push(dim.alias);
       }
 
       // Add measures to SELECT
@@ -4033,9 +4135,15 @@ Be specific with numbers and percentages when available. Prioritize actionable r
             whereConditions.push(`${colRef} IS NOT NULL`);
             break;
           case 'in':
+            let inValues: string[] = [];
             if (Array.isArray(filter.value)) {
-              const vals = filter.value.map(v => `'${v}'`).join(',');
-              whereConditions.push(`UPPER(${colRef}) IN (${vals.toUpperCase()})`);
+              inValues = filter.value;
+            } else if (typeof filter.value === 'string') {
+              inValues = filter.value.split(',').map(v => v.trim()).filter(v => v);
+            }
+            if (inValues.length > 0) {
+              const vals = inValues.map(v => `'${v.replace(/'/g, "''").toUpperCase()}'`).join(',');
+              whereConditions.push(`UPPER(${colRef}::text) IN (${vals})`);
             }
             break;
         }
@@ -4072,22 +4180,137 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       const result = await pool.query(sqlQuery);
       const executionTime = Date.now() - startTime;
 
-      // Build column metadata
+      // Process rows - convert Decimal objects to numbers
+      const flatData = result.rows.map(row => {
+        const processed: Record<string, any> = {};
+        for (const key of Object.keys(row)) {
+          processed[key] = typeof row[key] === 'object' ? Number(row[key]) || row[key] : row[key];
+        }
+        return processed;
+      });
+
+      // Check if we need to pivot (have column dimensions)
+      if (columnDimensionAliases.length > 0 && flatData.length > 0) {
+        // Pivot the data in memory
+        // Get unique column dimension values (capped at 25)
+        const columnValueSets: Map<string, Set<string>> = new Map();
+        for (const alias of columnDimensionAliases) {
+          columnValueSets.set(alias, new Set());
+        }
+        
+        for (const row of flatData) {
+          for (const alias of columnDimensionAliases) {
+            const valSet = columnValueSets.get(alias);
+            if (valSet && valSet.size < 25) {
+              valSet.add(String(row[alias] || 'Unknown'));
+            }
+          }
+        }
+
+        // Generate composite column keys (for multi-column dimensions)
+        const colValueArrays = columnDimensionAliases.map(alias => 
+          Array.from(columnValueSets.get(alias) || [])
+        );
+        
+        // Create column header combinations
+        const columnHeaders: string[] = [];
+        const generateCombinations = (arrays: string[][], prefix: string[] = [], depth: number = 0): string[][] => {
+          if (depth === arrays.length) return [prefix];
+          const result: string[][] = [];
+          for (const val of arrays[depth]) {
+            result.push(...generateCombinations(arrays, [...prefix, val], depth + 1));
+          }
+          return result;
+        };
+        
+        const combinations = generateCombinations(colValueArrays);
+        for (const combo of combinations) {
+          columnHeaders.push(combo.join(' | '));
+        }
+
+        // Build pivoted data
+        const rowKeyToData = new Map<string, Record<string, any>>();
+        
+        // Create set of valid column keys for overflow handling
+        const validColumnKeys = new Set(columnHeaders);
+
+        for (const row of flatData) {
+          // Build row key from row dimensions
+          const rowKey = rowDimensionAliases.map(a => String(row[a] || '')).join('||');
+          
+          // Build column key from column dimensions
+          let colKey = columnDimensionAliases.map(a => String(row[a] || 'Unknown')).join(' | ');
+          
+          // Handle overflow - if column key is not in valid set, map to "Other"
+          if (!validColumnKeys.has(colKey)) {
+            colKey = 'Other';
+            if (!validColumnKeys.has('Other')) {
+              columnHeaders.push('Other');
+              validColumnKeys.add('Other');
+            }
+          }
+          
+          // Initialize row if needed
+          if (!rowKeyToData.has(rowKey)) {
+            const newRow: Record<string, any> = {};
+            for (const alias of rowDimensionAliases) {
+              newRow[alias] = row[alias];
+            }
+            // Initialize all pivoted columns to 0/null
+            for (const header of columnHeaders) {
+              for (const measure of config.measures) {
+                newRow[`${header} - ${measure.alias}`] = 0;
+              }
+            }
+            rowKeyToData.set(rowKey, newRow);
+          }
+          
+          // Set the pivoted values (aggregate for "Other" overflow)
+          const pivotedRow = rowKeyToData.get(rowKey)!;
+          for (const measure of config.measures) {
+            const pivotColName = `${colKey} - ${measure.alias}`;
+            const currentVal = pivotedRow[pivotColName] || 0;
+            const newVal = row[measure.alias] || 0;
+            // Aggregate overflow values
+            pivotedRow[pivotColName] = colKey === 'Other' ? currentVal + newVal : newVal;
+          }
+        }
+
+        // Build column metadata for pivoted result
+        const pivotedColumns = [
+          ...config.dimensions.map(d => ({ key: d.alias, label: d.alias, type: d.column.type })),
+          ...columnHeaders.flatMap(header => 
+            config.measures.map(m => ({ 
+              key: `${header} - ${m.alias}`, 
+              label: `${header} - ${m.alias}`, 
+              type: 'numeric' 
+            }))
+          ),
+        ];
+
+        const pivotedData = Array.from(rowKeyToData.values());
+        
+        const queryResult: QueryResult = {
+          data: pivotedData,
+          columns: pivotedColumns,
+          rowCount: pivotedData.length,
+          executionTime,
+        };
+
+        res.json(queryResult);
+        return;
+      }
+
+      // No pivoting needed - return flat data
       const columns = [
         ...config.dimensions.map(d => ({ key: d.alias, label: d.alias, type: d.column.type })),
         ...config.measures.map(m => ({ key: m.alias, label: m.alias, type: 'numeric' })),
       ];
 
       const queryResult: QueryResult = {
-        data: result.rows.map(row => {
-          const processed: Record<string, any> = {};
-          for (const key of Object.keys(row)) {
-            processed[key] = typeof row[key] === 'object' ? Number(row[key]) || row[key] : row[key];
-          }
-          return processed;
-        }),
+        data: flatData,
         columns,
-        rowCount: result.rows.length,
+        rowCount: flatData.length,
         executionTime,
       };
 

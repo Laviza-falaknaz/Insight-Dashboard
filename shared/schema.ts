@@ -694,6 +694,7 @@ export interface QueryBuilderConfig {
   description?: string;
   entities: QueryEntity[];
   dimensions: QueryDimension[];
+  columnDimensions?: QueryDimension[];
   measures: QueryMeasure[];
   filters: QueryFilter[];
   sorts: QuerySort[];
