@@ -25,7 +25,8 @@ import {
   Database, Layers, Filter, BarChart3, Play, Save, Plus, X, 
   ArrowUpDown, ChevronRight, ChevronDown, TableIcon, PieChartIcon, LineChartIcon, 
   AreaChartIcon, Loader2, RefreshCw, GripVertical, Search, Check,
-  ArrowUp, ArrowDown, Settings2, Columns, Rows3, Hash, Calendar
+  ArrowUp, ArrowDown, Settings2, Columns, Rows3, Hash, Calendar,
+  RotateCcw, ArrowLeftRight
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -480,6 +481,27 @@ function FieldPill({
   );
 }
 
+interface EntityMeta {
+  id: QueryEntity;
+  name: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+}
+
+interface RelationshipMeta {
+  id: string;
+  sourceEntity: QueryEntity;
+  targetEntity: QueryEntity;
+  sourceField: string;
+  targetField: string;
+  label?: string;
+  bidirectional: boolean;
+  defaultJoinType: JoinType;
+  supportedJoinTypes: JoinType[];
+  joinFields: Array<{ from: string; to: string }>;
+}
+
 function DataSourcePanel({ 
   columnsData, 
   selectedEntities,
@@ -492,8 +514,15 @@ function DataSourcePanel({
   onJoinTypeChange,
   joinConditions,
   onJoinConditionsChange,
+  primaryEntity,
+  onPrimaryEntityChange,
 }: {
-  columnsData: { inventory: QueryColumn[]; returns: QueryColumn[]; relationships: any[] } | undefined;
+  columnsData: { 
+    inventory: QueryColumn[]; 
+    returns: QueryColumn[]; 
+    entities: EntityMeta[];
+    relationships: RelationshipMeta[];
+  } | undefined;
   selectedEntities: QueryEntity[];
   onEntityToggle: (entity: QueryEntity) => void;
   onAddToRows: (col: QueryColumn) => void;
@@ -504,10 +533,19 @@ function DataSourcePanel({
   onJoinTypeChange: (type: JoinType | 'none') => void;
   joinConditions: JoinCondition[];
   onJoinConditionsChange: (conditions: JoinCondition[]) => void;
+  primaryEntity: QueryEntity;
+  onPrimaryEntityChange: (entity: QueryEntity) => void;
 }) {
-  const [activeSource, setActiveSource] = useState<'inventory' | 'returns'>('inventory');
+  const [activeSource, setActiveSource] = useState<QueryEntity>('inventory');
   const [searchTerm, setSearchTerm] = useState("");
   const [showJoinConfig, setShowJoinConfig] = useState(false);
+
+  const entities = columnsData?.entities || [
+    { id: 'inventory' as QueryEntity, name: 'Inventory', icon: 'Package', color: '#3b82f6' },
+    { id: 'returns' as QueryEntity, name: 'Returns', icon: 'RotateCcw', color: '#f59e0b' },
+  ];
+
+  const relationships = columnsData?.relationships || [];
 
   const filterColumns = (columns: QueryColumn[]) => {
     if (!searchTerm) return columns;
@@ -520,13 +558,43 @@ function DataSourcePanel({
     return <Columns className="h-3 w-3 text-green-500" />;
   };
 
+  const getEntityIcon = (iconName?: string) => {
+    if (iconName === 'RotateCcw') return <RotateCcw className="h-3.5 w-3.5 mx-auto mb-1" />;
+    return <Database className="h-3.5 w-3.5 mx-auto mb-1" />;
+  };
+
   const handleDragStart = (e: React.DragEvent, col: QueryColumn) => {
     e.dataTransfer.setData('application/json', JSON.stringify(col));
     e.dataTransfer.effectAllowed = 'copy';
   };
 
   const hasValidJoin = joinType !== 'none' && joinConditions.some(c => c.leftField && c.rightField);
-  const hasReturnsSelected = selectedEntities.includes('returns');
+  const hasMultipleEntities = selectedEntities.length > 1;
+
+  const getActiveRelationship = (): RelationshipMeta | undefined => {
+    if (selectedEntities.length < 2) return undefined;
+    return relationships.find(r => 
+      (selectedEntities.includes(r.sourceEntity) && selectedEntities.includes(r.targetEntity)) ||
+      (r.bidirectional && selectedEntities.includes(r.targetEntity) && selectedEntities.includes(r.sourceEntity))
+    );
+  };
+
+  const activeRelationship = getActiveRelationship();
+
+  const getColumnsForEntity = (entity: QueryEntity): QueryColumn[] => {
+    if (!columnsData) return [];
+    const columnsByEntity: Record<string, QueryColumn[]> = {
+      inventory: columnsData.inventory || [],
+      returns: columnsData.returns || [],
+    };
+    return columnsByEntity[entity] || [];
+  };
+
+  const getSecondaryEntity = (): QueryEntity | undefined => {
+    return selectedEntities.find(e => e !== primaryEntity);
+  };
+
+  const secondaryEntity = getSecondaryEntity();
 
   const ColumnItem = ({ col }: { col: QueryColumn }) => (
     <div 
@@ -555,9 +623,22 @@ function DataSourcePanel({
     </div>
   );
 
-  const activeColumns = activeSource === 'inventory' 
-    ? filterColumns(columnsData?.inventory || [])
-    : filterColumns(columnsData?.returns || []);
+  const activeColumns = filterColumns(getColumnsForEntity(activeSource));
+
+  const getJoinLabel = (type: JoinType | 'none'): string => {
+    const primaryName = entities.find(e => e.id === primaryEntity)?.name || 'Primary';
+    const secondaryName = secondaryEntity ? (entities.find(e => e.id === secondaryEntity)?.name || 'Secondary') : 'Secondary';
+    
+    switch (type) {
+      case 'none': return 'No Link';
+      case 'left': return `Include All ${primaryName}`;
+      case 'inner': return 'Only Matching Records';
+      case 'right': return `Include All ${secondaryName}`;
+      case 'first': return 'First Match Only';
+      case 'exists': return 'Check If Exists';
+      default: return type;
+    }
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -567,44 +648,53 @@ function DataSourcePanel({
         </div>
         
         <div className="flex gap-2">
-          <button
-            onClick={() => setActiveSource('inventory')}
-            className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
-              activeSource === 'inventory' 
-                ? 'bg-primary text-primary-foreground' 
-                : 'bg-muted/50 hover:bg-muted'
-            }`}
-            data-testid="button-source-inventory"
-          >
-            <Database className="h-3.5 w-3.5 mx-auto mb-1" />
-            Inventory
-          </button>
-          <div className="flex-1 flex flex-col">
-            <button
-              onClick={() => { setActiveSource('returns'); if (!hasReturnsSelected) onEntityToggle('returns'); }}
-              className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
-                activeSource === 'returns' 
-                  ? 'bg-primary text-primary-foreground' 
-                  : 'bg-muted/50 hover:bg-muted'
-              }`}
-              data-testid="button-source-returns"
-            >
-              <Layers className="h-3.5 w-3.5 mx-auto mb-1" />
-              Returns
-            </button>
-            {hasReturnsSelected && (
-              <button
-                onClick={() => { onEntityToggle('returns'); setActiveSource('inventory'); }}
-                className="text-[9px] text-muted-foreground hover:text-foreground mt-0.5"
-                data-testid="button-remove-returns"
-              >
-                Remove
-              </button>
-            )}
-          </div>
+          {entities.map((entity) => {
+            const isSelected = selectedEntities.includes(entity.id);
+            const isActive = activeSource === entity.id;
+            const isPrimary = primaryEntity === entity.id;
+            
+            return (
+              <div key={entity.id} className="flex-1 flex flex-col">
+                <button
+                  onClick={() => { 
+                    setActiveSource(entity.id); 
+                    if (!isSelected) onEntityToggle(entity.id);
+                  }}
+                  className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors relative ${
+                    isActive 
+                      ? 'bg-primary text-primary-foreground' 
+                      : 'bg-muted/50 hover:bg-muted'
+                  }`}
+                  style={isActive ? {} : { borderLeft: `3px solid ${entity.color}` }}
+                  data-testid={`button-source-${entity.id}`}
+                >
+                  {getEntityIcon(entity.icon)}
+                  {entity.name}
+                  {isPrimary && hasMultipleEntities && (
+                    <span className="absolute -top-1 -right-1 text-[8px] bg-primary text-primary-foreground px-1 rounded">
+                      Primary
+                    </span>
+                  )}
+                </button>
+                {isSelected && entity.id !== 'inventory' && (
+                  <button
+                    onClick={() => { 
+                      onEntityToggle(entity.id); 
+                      if (activeSource === entity.id) setActiveSource('inventory');
+                      if (primaryEntity === entity.id) onPrimaryEntityChange('inventory');
+                    }}
+                    className="text-[9px] text-muted-foreground hover:text-foreground mt-0.5"
+                    data-testid={`button-remove-${entity.id}`}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
 
-        {hasReturnsSelected && (
+        {hasMultipleEntities && activeRelationship && (
           <div 
             className={`p-2 rounded-md border cursor-pointer transition-colors ${
               hasValidJoin 
@@ -617,8 +707,13 @@ function DataSourcePanel({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className={`h-2 w-2 rounded-full ${hasValidJoin ? 'bg-green-500' : 'bg-amber-500'}`} />
-                <span className="text-xs font-medium">
-                  {hasValidJoin ? `Linked: ${joinConditions.filter(c => c.leftField && c.rightField).length} field(s)` : 'Configure Link'}
+                <span className="text-xs font-medium flex items-center gap-1">
+                  {entities.find(e => e.id === primaryEntity)?.name}
+                  <ArrowLeftRight className="h-3 w-3" />
+                  {entities.find(e => e.id === secondaryEntity)?.name}
+                  {activeRelationship.bidirectional && (
+                    <span className="text-[9px] text-muted-foreground">(bidirectional)</span>
+                  )}
                 </span>
               </div>
               {showJoinConfig ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -626,17 +721,37 @@ function DataSourcePanel({
             
             {showJoinConfig && (
               <div className="mt-3 space-y-3" onClick={e => e.stopPropagation()}>
+                <div className="flex gap-2 items-center">
+                  <span className="text-[10px] text-muted-foreground">Direction:</span>
+                  <Button 
+                    variant={primaryEntity === activeRelationship.sourceEntity ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-6 text-[10px] px-2"
+                    onClick={() => onPrimaryEntityChange(activeRelationship.sourceEntity)}
+                  >
+                    {entities.find(e => e.id === activeRelationship.sourceEntity)?.name} First
+                  </Button>
+                  {activeRelationship.bidirectional && (
+                    <Button 
+                      variant={primaryEntity === activeRelationship.targetEntity ? 'default' : 'outline'}
+                      size="sm"
+                      className="h-6 text-[10px] px-2"
+                      onClick={() => onPrimaryEntityChange(activeRelationship.targetEntity)}
+                    >
+                      {entities.find(e => e.id === activeRelationship.targetEntity)?.name} First
+                    </Button>
+                  )}
+                </div>
+
                 <Select value={joinType} onValueChange={(v) => onJoinTypeChange(v as JoinType | 'none')}>
                   <SelectTrigger className="h-8 text-xs" data-testid="select-join-type">
                     <SelectValue placeholder="Select join type" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Link</SelectItem>
-                    <SelectItem value="left">Include All Inventory</SelectItem>
-                    <SelectItem value="inner">Only Matching Records</SelectItem>
-                    <SelectItem value="right">Include All Returns</SelectItem>
-                    <SelectItem value="first">First Match Only</SelectItem>
-                    <SelectItem value="exists">Check If Exists</SelectItem>
+                    {activeRelationship.supportedJoinTypes.map(type => (
+                      <SelectItem key={type} value={type}>{getJoinLabel(type)}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 
@@ -656,7 +771,9 @@ function DataSourcePanel({
                     </div>
                     
                     {joinConditions.length === 0 && (
-                      <p className="text-[10px] text-muted-foreground">Add fields to match inventory with returns</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Add fields to match {entities.find(e => e.id === primaryEntity)?.name} with {entities.find(e => e.id === secondaryEntity)?.name}
+                      </p>
                     )}
                     
                     {joinConditions.map((cond, idx) => (
@@ -667,10 +784,10 @@ function DataSourcePanel({
                           onJoinConditionsChange(updated);
                         }}>
                           <SelectTrigger className="h-6 text-[10px] flex-1" data-testid={`select-left-field-${idx}`}>
-                            <SelectValue placeholder="Inventory" />
+                            <SelectValue placeholder={entities.find(e => e.id === primaryEntity)?.name} />
                           </SelectTrigger>
                           <SelectContent>
-                            {columnsData?.inventory.map(col => (
+                            {getColumnsForEntity(primaryEntity).map(col => (
                               <SelectItem key={col.field} value={col.field} className="text-xs">{col.label}</SelectItem>
                             ))}
                           </SelectContent>
@@ -682,10 +799,10 @@ function DataSourcePanel({
                           onJoinConditionsChange(updated);
                         }}>
                           <SelectTrigger className="h-6 text-[10px] flex-1" data-testid={`select-right-field-${idx}`}>
-                            <SelectValue placeholder="Returns" />
+                            <SelectValue placeholder={entities.find(e => e.id === secondaryEntity)?.name} />
                           </SelectTrigger>
                           <SelectContent>
-                            {columnsData?.returns.map(col => (
+                            {secondaryEntity && getColumnsForEntity(secondaryEntity).map(col => (
                               <SelectItem key={col.field} value={col.field} className="text-xs">{col.label}</SelectItem>
                             ))}
                           </SelectContent>
@@ -741,6 +858,7 @@ export default function DataTablePage() {
   const { toast } = useToast();
   
   const [selectedEntities, setSelectedEntities] = useState<QueryEntity[]>(['inventory']);
+  const [primaryEntity, setPrimaryEntity] = useState<QueryEntity>('inventory');
   const [rowFields, setRowFields] = useState<PivotField[]>([]);
   const [columnFields, setColumnFields] = useState<PivotField[]>([]);
   const [valueFields, setValueFields] = useState<PivotField[]>([]);
@@ -759,7 +877,19 @@ export default function DataTablePage() {
   const { data: columnsData, isLoading: columnsLoading } = useQuery<{
     inventory: QueryColumn[];
     returns: QueryColumn[];
-    relationships: any[];
+    entities: Array<{ id: QueryEntity; name: string; description?: string; icon?: string; color?: string }>;
+    relationships: Array<{
+      id: string;
+      sourceEntity: QueryEntity;
+      targetEntity: QueryEntity;
+      sourceField: string;
+      targetField: string;
+      label?: string;
+      bidirectional: boolean;
+      defaultJoinType: JoinType;
+      supportedJoinTypes: JoinType[];
+      joinFields: Array<{ from: string; to: string }>;
+    }>;
   }>({
     queryKey: ["/api/query-builder/columns"],
   });
@@ -1198,6 +1328,8 @@ export default function DataTablePage() {
             onJoinTypeChange={setJoinType}
             joinConditions={joinConditions}
             onJoinConditionsChange={setJoinConditions}
+            primaryEntity={primaryEntity}
+            onPrimaryEntityChange={setPrimaryEntity}
           />
         </div>
 
