@@ -494,7 +494,17 @@ export default function DataTablePage() {
         if (f.operator === 'is_null') return `${colName} IS NULL`;
         if (f.operator === 'is_not_null') return `${colName} IS NOT NULL`;
         if (f.operator === 'contains') return `${colName} LIKE '%${f.value}%'`;
-        return `${colName} ${f.operator} '${f.value}'`;
+        if (f.operator === 'starts_with') return `${colName} LIKE '${f.value}%'`;
+        if (f.operator === 'ends_with') return `${colName} LIKE '%${f.value}'`;
+        if (f.operator === 'between' && f.value2) return `${colName} BETWEEN '${f.value}' AND '${f.value2}'`;
+        if (f.operator === 'in') return `${colName} IN (${f.value.split(',').map(v => `'${v.trim()}'`).join(', ')})`;
+        if (f.operator === 'not_in') return `${colName} NOT IN (${f.value.split(',').map(v => `'${v.trim()}'`).join(', ')})`;
+        const opMap: Record<string, string> = {
+          'equals': '=', 'not_equals': '!=', 'greater_than': '>', 'less_than': '<',
+          'greater_equal': '>=', 'less_equal': '<='
+        };
+        const sqlOp = opMap[f.operator] || f.operator;
+        return `${colName} ${sqlOp} '${f.value}'`;
       });
       if (hasExistsClause) {
         sql += `\n  AND ${filterParts.join('\n  AND ')}`;
