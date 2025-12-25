@@ -4,6 +4,7 @@ import {
   Search,
   FileBarChart,
   BookmarkCheck,
+  TrendingUp,
 } from "lucide-react";
 import {
   Sidebar,
@@ -23,6 +24,12 @@ const navigationItems = [
     icon: LayoutDashboard,
     url: "/",
     description: "Executive overview",
+  },
+  {
+    title: "Forecasts",
+    icon: TrendingUp,
+    url: "/forecasts",
+    description: "Predictive analytics",
   },
   {
     title: "Explore Data",

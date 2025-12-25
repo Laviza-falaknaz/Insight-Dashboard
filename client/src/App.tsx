@@ -20,6 +20,7 @@ import CommandCenter from "@/pages/command-center";
 import DataTablePage from "@/pages/data-table-page";
 import Reports from "@/pages/reports";
 import MyCollection from "@/pages/my-collection";
+import Forecasts from "@/pages/forecasts";
 import Login from "@/pages/login";
 import Admin from "@/pages/admin";
 import NotFound from "@/pages/not-found";
@@ -89,6 +90,7 @@ function AppRoutes() {
     <MainLayout>
       <Switch>
         <Route path="/" component={CommandCenter} />
+        <Route path="/forecasts" component={Forecasts} />
         <Route path="/explore" component={DataTablePage} />
         <Route path="/reports" component={Reports} />
         <Route path="/saved" component={MyCollection} />
