@@ -1009,9 +1009,7 @@ export default function DataTablePage() {
     if (value === null || value === undefined) return '-';
     const num = typeof value === 'number' ? value : parseFloat(String(value));
     if (!isNaN(num) && type === 'numeric') {
-      if (Math.abs(num) >= 1000000) return `$${(num / 1000000).toFixed(1)}M`;
-      if (Math.abs(num) >= 1000) return `$${(num / 1000).toFixed(1)}K`;
-      return `$${num.toFixed(0)}`;
+      return num.toLocaleString('en-US', { maximumFractionDigits: 2 });
     }
     return String(value);
   };
