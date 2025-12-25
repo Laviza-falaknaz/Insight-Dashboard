@@ -1275,3 +1275,58 @@ export interface PredictiveAnalyticsDashboard {
     recommendations: string[];
   };
 }
+
+// Entity configuration for Data Explorer visibility
+export const entityConfigs = pgTable("entity_configs", {
+  id: serial("id").primaryKey(),
+  entityId: text("entity_id").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  description: text("description"),
+  isVisible: text("is_visible").default("true"),
+  icon: text("icon"),
+  color: text("color"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertEntityConfigSchema = createInsertSchema(entityConfigs).omit({ id: true, createdAt: true });
+export type InsertEntityConfig = z.infer<typeof insertEntityConfigSchema>;
+export type EntityConfig = typeof entityConfigs.$inferSelect;
+
+// Join key definitions between entities
+export const entityJoinKeys = pgTable("entity_join_keys", {
+  id: serial("id").primaryKey(),
+  sourceEntityId: text("source_entity_id").notNull(),
+  targetEntityId: text("target_entity_id").notNull(),
+  name: text("name").notNull(),
+  sourceField: text("source_field").notNull(),
+  targetField: text("target_field").notNull(),
+  isDefault: text("is_default").default("false"),
+  supportedJoinTypes: text("supported_join_types").default("inner,left,right"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertEntityJoinKeySchema = createInsertSchema(entityJoinKeys).omit({ id: true, createdAt: true });
+export type InsertEntityJoinKey = z.infer<typeof insertEntityJoinKeySchema>;
+export type EntityJoinKey = typeof entityJoinKeys.$inferSelect;
+
+// Interface for join key configuration in UI
+export interface JoinKeyConfig {
+  id: number;
+  sourceEntityId: string;
+  targetEntityId: string;
+  name: string;
+  sourceField: string;
+  targetField: string;
+  isDefault: boolean;
+  supportedJoinTypes: JoinType[];
+}
+
+// Multi-join node for query builder
+export interface JoinNode {
+  id: string;
+  parentEntityId: string;
+  targetEntityId: string;
+  joinType: JoinType;
+  joinKeyId?: number;
+  customConditions: JoinCondition[];
+}

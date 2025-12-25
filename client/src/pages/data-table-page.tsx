@@ -20,7 +20,7 @@ import {
   Database, Filter, BarChart3, Play, Save, Plus, X, 
   ChevronRight, ChevronDown, TableIcon, PieChartIcon, LineChartIcon, 
   AreaChartIcon, Loader2, RefreshCw, Search, ArrowUp, ArrowDown,
-  ArrowLeftRight, Columns, Hash, Calendar, RotateCcw
+  ArrowLeftRight, Columns, Hash, Calendar, RotateCcw, Code, Copy, Check
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -116,9 +116,10 @@ interface RelationshipMeta {
   targetField: string;
   label?: string;
   bidirectional: boolean;
+  isDefault?: boolean;
   defaultJoinType: JoinType;
   supportedJoinTypes: JoinType[];
-  joinFields: Array<{ from: string; to: string }>;
+  joinFields?: Array<{ from: string; to: string }>;
 }
 
 export default function DataTablePage() {
@@ -140,6 +141,7 @@ export default function DataTablePage() {
   // Join configuration
   const [joinType, setJoinType] = useState<JoinType>('left');
   const [joinConditions, setJoinConditions] = useState<JoinCondition[]>([]);
+  const [selectedJoinPreset, setSelectedJoinPreset] = useState<string | null>(null);
   
   // Limit & output
   const [limit, setLimit] = useState(100);
@@ -158,6 +160,8 @@ export default function DataTablePage() {
     join: false,
   });
   const [columnSearch, setColumnSearch] = useState("");
+  const [showSqlPreview, setShowSqlPreview] = useState(true);
+  const [sqlCopied, setSqlCopied] = useState(false);
 
   const { data: columnsData, isLoading: columnsLoading } = useQuery<{
     inventory: QueryColumn[];
@@ -239,6 +243,14 @@ export default function DataTablePage() {
   const activeRelationship = useMemo(() => {
     if (!secondaryEntity) return undefined;
     return relationships.find(r => 
+      (r.sourceEntity === primaryEntity && r.targetEntity === secondaryEntity) ||
+      (r.bidirectional && r.targetEntity === primaryEntity && r.sourceEntity === secondaryEntity)
+    );
+  }, [relationships, primaryEntity, secondaryEntity]);
+
+  const availableJoinPresets = useMemo(() => {
+    if (!secondaryEntity) return [];
+    return relationships.filter(r => 
       (r.sourceEntity === primaryEntity && r.targetEntity === secondaryEntity) ||
       (r.bidirectional && r.targetEntity === primaryEntity && r.sourceEntity === secondaryEntity)
     );
@@ -375,6 +387,72 @@ export default function DataTablePage() {
       })(),
       limit,
     };
+  };
+
+  const generateSqlPreview = (): string => {
+    if (selectedColumns.length === 0) return '-- SELECT columns to build a query';
+    
+    const aggregatedCols = selectedColumns.filter(c => c.aggregation);
+    const groupByCols = selectedColumns.filter(c => !c.aggregation);
+    
+    const selectParts = selectedColumns.map(c => {
+      const colName = `${c.entity}.${c.field}`;
+      if (c.aggregation) {
+        return `${c.aggregation.toUpperCase()}(${colName}) AS "${c.aggregation}_${c.field}"`;
+      }
+      return colName;
+    });
+    
+    let sql = `SELECT ${selectParts.join(',\n       ')}`;
+    sql += `\nFROM ${primaryEntity}`;
+    
+    if (secondaryEntity && joinConditions.length > 0) {
+      const validConditions = joinConditions.filter(c => c.leftField && c.rightField);
+      if (validConditions.length > 0) {
+        const onClause = validConditions.map(c => `${primaryEntity}.${c.leftField} = ${secondaryEntity}.${c.rightField}`).join(' AND ');
+        
+        if (joinType === 'exists') {
+          sql += `\nWHERE EXISTS (\n  SELECT 1 FROM ${secondaryEntity}\n  WHERE ${onClause}\n)`;
+        } else if (joinType === 'first') {
+          sql += `\nLEFT JOIN LATERAL (\n  SELECT * FROM ${secondaryEntity}\n  WHERE ${onClause}\n  LIMIT 1\n) AS ${secondaryEntity}_first ON TRUE`;
+        } else {
+          sql += `\n${joinType.toUpperCase()} JOIN ${secondaryEntity}`;
+          sql += `\n  ON ${validConditions.map(c => `${primaryEntity}.${c.leftField} = ${secondaryEntity}.${c.rightField}`).join('\n  AND ')}`;
+        }
+      }
+    }
+    
+    const validJoinConditions = secondaryEntity && joinConditions.length > 0 
+      ? joinConditions.filter(c => c.leftField && c.rightField)
+      : [];
+    const hasExistsClause = joinType === 'exists' && validJoinConditions.length > 0;
+    
+    if (filters.length > 0) {
+      const filterParts = filters.map(f => {
+        const colName = `${f.entity}.${f.field}`;
+        if (f.operator === 'is_null') return `${colName} IS NULL`;
+        if (f.operator === 'is_not_null') return `${colName} IS NOT NULL`;
+        if (f.operator === 'contains') return `${colName} LIKE '%${f.value}%'`;
+        return `${colName} ${f.operator} '${f.value}'`;
+      });
+      if (hasExistsClause) {
+        sql += `\n  AND ${filterParts.join('\n  AND ')}`;
+      } else {
+        sql += `\nWHERE ${filterParts.join('\n  AND ')}`;
+      }
+    }
+    
+    if (aggregatedCols.length > 0 && groupByCols.length > 0) {
+      sql += `\nGROUP BY ${groupByCols.map(c => `${c.entity}.${c.field}`).join(', ')}`;
+    }
+    
+    if (orderBy.length > 0) {
+      sql += `\nORDER BY ${orderBy.map(o => `${o.entity}.${o.field} ${o.direction.toUpperCase()}`).join(', ')}`;
+    }
+    
+    sql += `\nLIMIT ${limit}`;
+    
+    return sql;
   };
 
   const executeQuery = () => {
@@ -602,7 +680,7 @@ export default function DataTablePage() {
               </Collapsible>
 
               {/* 2. JOIN Configuration */}
-              {secondaryEntity && activeRelationship && (
+              {secondaryEntity && (
                 <Collapsible open={expandedSections.join} onOpenChange={() => toggleSection('join')}>
                   <CollapsibleTrigger asChild>
                     <div className="flex items-center justify-between p-2 rounded-md bg-card border cursor-pointer hover-elevate">
@@ -615,6 +693,48 @@ export default function DataTablePage() {
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent className="pt-2 space-y-2">
+                    {/* Preset Join Key Selector */}
+                    {availableJoinPresets.length > 0 && (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Join Preset</Label>
+                        <Select 
+                          value={selectedJoinPreset || 'custom'} 
+                          onValueChange={(v) => {
+                            if (v === 'custom') {
+                              setSelectedJoinPreset(null);
+                              setJoinConditions([]);
+                            } else {
+                              setSelectedJoinPreset(v);
+                              const preset = relationships.find(r => r.id === v);
+                              if (preset) {
+                                const isBidirectionalSwapped = preset.bidirectional && preset.targetEntity === primaryEntity;
+                                setJoinConditions([{
+                                  leftField: isBidirectionalSwapped ? preset.targetField : preset.sourceField,
+                                  rightField: isBidirectionalSwapped ? preset.sourceField : preset.targetField,
+                                  comparator: '='
+                                }]);
+                                setJoinType(preset.defaultJoinType);
+                              }
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-sm" data-testid="select-join-preset">
+                            <SelectValue placeholder="Select preset..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableJoinPresets.map(preset => (
+                              <SelectItem key={preset.id} value={preset.id}>
+                                <div className="flex items-center gap-1">
+                                  {preset.isDefault && <Badge variant="default" className="text-[9px] h-4">Default</Badge>}
+                                  <span>{preset.label}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                            <SelectItem value="custom">Custom...</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     <div className="space-y-1">
                       <Label className="text-xs text-muted-foreground">Join Type</Label>
                       <Select value={joinType} onValueChange={(v) => setJoinType(v as JoinType)}>
@@ -906,6 +1026,46 @@ export default function DataTablePage() {
 
         {/* Results Panel */}
         <div className="flex-1 flex flex-col overflow-hidden">
+          {/* SQL Preview */}
+          <Collapsible open={showSqlPreview} onOpenChange={setShowSqlPreview}>
+            <CollapsibleTrigger asChild>
+              <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/30 cursor-pointer">
+                <div className="flex items-center gap-2">
+                  <Code className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">SQL Preview</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigator.clipboard.writeText(generateSqlPreview());
+                      setSqlCopied(true);
+                      setTimeout(() => setSqlCopied(false), 2000);
+                    }}
+                    data-testid="button-copy-sql"
+                  >
+                    {sqlCopied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                    <span className="ml-1 text-xs">{sqlCopied ? 'Copied' : 'Copy'}</span>
+                  </Button>
+                  {showSqlPreview ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </div>
+              </div>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="px-4 py-3 bg-muted/20 border-b">
+                <pre 
+                  className="text-xs font-mono overflow-x-auto p-3 rounded-md bg-background border whitespace-pre-wrap"
+                  data-testid="sql-preview-code"
+                >
+                  {generateSqlPreview()}
+                </pre>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+
           {/* Chart type selector */}
           <div className="flex items-center gap-2 px-4 py-2 border-b bg-card/50">
             <span className="text-xs text-muted-foreground">View:</span>

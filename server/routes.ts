@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import passport from "passport";
 import { db, pool } from "./db";
-import { inventory, dataUploads, returns, users, themePresets, savedCollections, type ThemeId } from "@shared/schema";
+import { inventory, dataUploads, returns, users, themePresets, savedCollections, entityConfigs, entityJoinKeys, type ThemeId } from "@shared/schema";
 import { eq, sql, and, gte, lte, inArray, desc, asc, count, sum, isNotNull, ne } from "drizzle-orm";
 import { setupAuth, requireAuth, requireAdminToken, registerUser } from "./auth";
 import OpenAI from "openai";
@@ -249,6 +249,161 @@ export async function registerRoutes(
       res.json({ logs, currentStatus: refreshStatus });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch logs" });
+    }
+  });
+  
+  // Admin: Get all entity configurations
+  app.get("/api/admin/entities", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const configs = await db.select().from(entityConfigs);
+      const joinKeys = await db.select().from(entityJoinKeys);
+      res.json({ entities: configs, joinKeys });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch entity configs" });
+    }
+  });
+  
+  // Admin: Update entity visibility
+  app.put("/api/admin/entities/:entityId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { entityId } = req.params;
+      const { isVisible, displayName, description, icon, color } = req.body;
+      
+      const updated = await db
+        .update(entityConfigs)
+        .set({ 
+          isVisible: isVisible ? 'true' : 'false',
+          displayName,
+          description,
+          icon,
+          color
+        })
+        .where(eq(entityConfigs.entityId, entityId))
+        .returning();
+      
+      if (updated.length === 0) {
+        return res.status(404).json({ error: "Entity not found" });
+      }
+      res.json(updated[0]);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update entity" });
+    }
+  });
+  
+  // Admin: Create new entity config
+  app.post("/api/admin/entities", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { entityId, displayName, description, isVisible, icon, color } = req.body;
+      
+      const created = await db
+        .insert(entityConfigs)
+        .values({ entityId, displayName, description, isVisible: isVisible ? 'true' : 'false', icon, color })
+        .returning();
+      
+      res.json(created[0]);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create entity config" });
+    }
+  });
+  
+  // Admin: Get all join keys
+  app.get("/api/admin/join-keys", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const joinKeys = await db.select().from(entityJoinKeys);
+      res.json(joinKeys);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch join keys" });
+    }
+  });
+  
+  // Admin: Create join key
+  app.post("/api/admin/join-keys", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { sourceEntityId, targetEntityId, name, sourceField, targetField, isDefault, supportedJoinTypes } = req.body;
+      
+      // If this is default, unset other defaults for this pair
+      if (isDefault) {
+        await db
+          .update(entityJoinKeys)
+          .set({ isDefault: 'false' })
+          .where(
+            and(
+              eq(entityJoinKeys.sourceEntityId, sourceEntityId),
+              eq(entityJoinKeys.targetEntityId, targetEntityId)
+            )
+          );
+      }
+      
+      const created = await db
+        .insert(entityJoinKeys)
+        .values({ 
+          sourceEntityId, 
+          targetEntityId, 
+          name, 
+          sourceField, 
+          targetField, 
+          isDefault: isDefault ? 'true' : 'false',
+          supportedJoinTypes: supportedJoinTypes || 'inner,left,right'
+        })
+        .returning();
+      
+      res.json(created[0]);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create join key" });
+    }
+  });
+  
+  // Admin: Update join key
+  app.put("/api/admin/join-keys/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { name, sourceField, targetField, isDefault, supportedJoinTypes } = req.body;
+      
+      // If setting as default, unset others
+      if (isDefault) {
+        const existing = await db.select().from(entityJoinKeys).where(eq(entityJoinKeys.id, parseInt(id)));
+        if (existing.length > 0) {
+          await db
+            .update(entityJoinKeys)
+            .set({ isDefault: 'false' })
+            .where(
+              and(
+                eq(entityJoinKeys.sourceEntityId, existing[0].sourceEntityId),
+                eq(entityJoinKeys.targetEntityId, existing[0].targetEntityId)
+              )
+            );
+        }
+      }
+      
+      const updated = await db
+        .update(entityJoinKeys)
+        .set({ 
+          name, 
+          sourceField, 
+          targetField, 
+          isDefault: isDefault ? 'true' : 'false',
+          supportedJoinTypes 
+        })
+        .where(eq(entityJoinKeys.id, parseInt(id)))
+        .returning();
+      
+      if (updated.length === 0) {
+        return res.status(404).json({ error: "Join key not found" });
+      }
+      res.json(updated[0]);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update join key" });
+    }
+  });
+  
+  // Admin: Delete join key
+  app.delete("/api/admin/join-keys/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      await db.delete(entityJoinKeys).where(eq(entityJoinKeys.id, parseInt(id)));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete join key" });
     }
   });
   
@@ -3958,31 +4113,69 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       { entity: 'returns', field: 'expectedShippingDate', label: 'Expected Shipping Date', type: 'date', aggregatable: false },
     ];
 
-    res.json({
-      inventory: inventoryColumns,
-      returns: returnsColumns,
-      entities: [
-        { id: 'inventory', name: 'Inventory', description: 'Main inventory and sales data', icon: 'Package', color: '#3b82f6' },
-        { id: 'returns', name: 'Returns', description: 'Return and warranty claims', icon: 'RotateCcw', color: '#f59e0b' },
-      ],
-      relationships: [
-        {
-          id: 'inventory-returns',
-          sourceEntity: 'inventory',
-          targetEntity: 'returns',
-          sourceField: 'inventSerialId',
-          targetField: 'serialId',
-          label: 'Serial Number Link',
+    // Fetch entity configs from database
+    const entityConfigsData = await db.select().from(entityConfigs);
+    const joinKeysData = await db.select().from(entityJoinKeys);
+    
+    // Build entities list from database (fall back to defaults if empty)
+    const entities = entityConfigsData.length > 0 
+      ? entityConfigsData
+          .filter(e => e.isVisible === 'true')
+          .map(e => ({
+            id: e.entityId,
+            name: e.displayName,
+            description: e.description || '',
+            icon: e.icon || 'Database',
+            color: e.color || '#6b7280'
+          }))
+      : [
+          { id: 'inventory', name: 'Inventory', description: 'Main inventory and sales data', icon: 'Package', color: '#3b82f6' },
+          { id: 'returns', name: 'Returns', description: 'Return and warranty claims', icon: 'RotateCcw', color: '#f59e0b' },
+        ];
+    
+    // Filter columns based on visible entities
+    const visibleEntityIds = entities.map(e => e.id);
+    const filteredColumns: Record<string, QueryColumn[]> = {};
+    if (visibleEntityIds.includes('inventory')) {
+      filteredColumns.inventory = inventoryColumns;
+    }
+    if (visibleEntityIds.includes('returns')) {
+      filteredColumns.returns = returnsColumns;
+    }
+    
+    // Build relationships/join keys from database
+    const relationships = joinKeysData.length > 0
+      ? joinKeysData.map(jk => ({
+          id: `${jk.sourceEntityId}-${jk.targetEntityId}-${jk.id}`,
+          sourceEntity: jk.sourceEntityId,
+          targetEntity: jk.targetEntityId,
+          sourceField: jk.sourceField,
+          targetField: jk.targetField,
+          label: jk.name,
           bidirectional: true,
-          defaultJoinType: 'left',
-          supportedJoinTypes: ['inner', 'left', 'right', 'first', 'exists'],
-          joinFields: [
-            { from: 'inventSerialId', to: 'serialId' },
-            { from: 'dataAreaId', to: 'areaId' },
-            { from: 'itemId', to: 'itemId' }
-          ]
-        }
-      ]
+          isDefault: jk.isDefault === 'true',
+          defaultJoinType: 'left' as const,
+          supportedJoinTypes: (jk.supportedJoinTypes || 'inner,left,right').split(',') as ('inner' | 'left' | 'right' | 'first' | 'exists')[]
+        }))
+      : [
+          {
+            id: 'inventory-returns',
+            sourceEntity: 'inventory',
+            targetEntity: 'returns',
+            sourceField: 'inventSerialId',
+            targetField: 'serialId',
+            label: 'Serial Number Link',
+            bidirectional: true,
+            isDefault: true,
+            defaultJoinType: 'left' as const,
+            supportedJoinTypes: ['inner', 'left', 'right', 'first', 'exists'] as ('inner' | 'left' | 'right' | 'first' | 'exists')[]
+          }
+        ];
+
+    res.json({
+      ...filteredColumns,
+      entities,
+      relationships
     });
   });
 

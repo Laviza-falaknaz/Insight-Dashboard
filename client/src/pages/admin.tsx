@@ -4,8 +4,34 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, RefreshCw, Shield, CheckCircle, XCircle, Clock } from "lucide-react";
+import { Loader2, RefreshCw, Shield, CheckCircle, XCircle, Clock, Database, Link2, Trash2, Plus, Package, RotateCcw } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+
+interface EntityConfig {
+  id: number;
+  entityId: string;
+  displayName: string;
+  description: string | null;
+  isVisible: string;
+  icon: string | null;
+  color: string | null;
+}
+
+interface JoinKey {
+  id: number;
+  sourceEntityId: string;
+  targetEntityId: string;
+  name: string;
+  sourceField: string;
+  targetField: string;
+  isDefault: string;
+  supportedJoinTypes: string | null;
+}
 
 interface RefreshStatus {
   isRunning: boolean;
@@ -280,7 +306,291 @@ export default function Admin() {
             )}
           </CardContent>
         </Card>
+
+        <EntityConfigManager />
       </div>
     </div>
+  );
+}
+
+function EntityConfigManager() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [newJoinKey, setNewJoinKey] = useState({
+    sourceEntityId: "",
+    targetEntityId: "",
+    name: "",
+    sourceField: "",
+    targetField: "",
+    isDefault: false
+  });
+
+  const { data: adminData, isLoading } = useQuery<{ entities: EntityConfig[], joinKeys: JoinKey[] }>({
+    queryKey: ["/api/admin/entities"],
+  });
+
+  const toggleVisibilityMutation = useMutation({
+    mutationFn: async ({ entityId, isVisible }: { entityId: string, isVisible: boolean }) => {
+      const entity = adminData?.entities.find(e => e.entityId === entityId);
+      return apiRequest("PUT", `/api/admin/entities/${entityId}`, {
+        isVisible,
+        displayName: entity?.displayName,
+        description: entity?.description,
+        icon: entity?.icon,
+        color: entity?.color
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/entities"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/query-builder/columns"] });
+      toast({ title: "Updated", description: "Entity visibility updated" });
+    }
+  });
+
+  const createJoinKeyMutation = useMutation({
+    mutationFn: async (data: typeof newJoinKey) => {
+      return apiRequest("POST", "/api/admin/join-keys", {
+        ...data,
+        supportedJoinTypes: "inner,left,right"
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/entities"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/query-builder/columns"] });
+      setNewJoinKey({ sourceEntityId: "", targetEntityId: "", name: "", sourceField: "", targetField: "", isDefault: false });
+      toast({ title: "Created", description: "Join key created successfully" });
+    }
+  });
+
+  const setDefaultMutation = useMutation({
+    mutationFn: async ({ id, isDefault }: { id: number, isDefault: boolean }) => {
+      const joinKey = adminData?.joinKeys.find(jk => jk.id === id);
+      return apiRequest("PUT", `/api/admin/join-keys/${id}`, {
+        name: joinKey?.name,
+        sourceField: joinKey?.sourceField,
+        targetField: joinKey?.targetField,
+        isDefault,
+        supportedJoinTypes: joinKey?.supportedJoinTypes
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/entities"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/query-builder/columns"] });
+      toast({ title: "Updated", description: "Default join key updated" });
+    }
+  });
+
+  const deleteJoinKeyMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return apiRequest("DELETE", `/api/admin/join-keys/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/entities"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/query-builder/columns"] });
+      toast({ title: "Deleted", description: "Join key removed" });
+    }
+  });
+
+  const getEntityIcon = (entityId: string) => {
+    if (entityId === 'inventory') return <Package className="h-4 w-4" />;
+    if (entityId === 'returns') return <RotateCcw className="h-4 w-4" />;
+    return <Database className="h-4 w-4" />;
+  };
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const entities = adminData?.entities || [];
+  const joinKeys = adminData?.joinKeys || [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Database className="h-5 w-5" />
+          Entity Configuration
+        </CardTitle>
+        <CardDescription>Manage which data sources are available and how they can be joined</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Tabs defaultValue="entities">
+          <TabsList className="mb-4">
+            <TabsTrigger value="entities" data-testid="tab-entities">Entities</TabsTrigger>
+            <TabsTrigger value="joinkeys" data-testid="tab-joinkeys">Join Keys</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="entities" className="space-y-4">
+            {entities.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No entities configured</p>
+            ) : (
+              <div className="space-y-3">
+                {entities.map((entity) => (
+                  <div
+                    key={entity.entityId}
+                    className="flex items-center justify-between gap-4 p-4 rounded-md bg-muted/30"
+                    data-testid={`entity-row-${entity.entityId}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      {getEntityIcon(entity.entityId)}
+                      <div>
+                        <p className="font-medium">{entity.displayName}</p>
+                        <p className="text-xs text-muted-foreground">{entity.description || entity.entityId}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor={`visible-${entity.entityId}`} className="text-sm text-muted-foreground">
+                        Visible
+                      </Label>
+                      <Switch
+                        id={`visible-${entity.entityId}`}
+                        checked={entity.isVisible === 'true'}
+                        onCheckedChange={(checked) => toggleVisibilityMutation.mutate({ entityId: entity.entityId, isVisible: checked })}
+                        data-testid={`switch-visibility-${entity.entityId}`}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="joinkeys" className="space-y-4">
+            <div className="p-4 rounded-md border space-y-4">
+              <h4 className="font-medium text-sm">Add New Join Key</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Source Entity</Label>
+                  <Select value={newJoinKey.sourceEntityId} onValueChange={(v) => setNewJoinKey(prev => ({ ...prev, sourceEntityId: v }))}>
+                    <SelectTrigger data-testid="select-source-entity">
+                      <SelectValue placeholder="Select source" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {entities.map(e => (
+                        <SelectItem key={e.entityId} value={e.entityId}>{e.displayName}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Target Entity</Label>
+                  <Select value={newJoinKey.targetEntityId} onValueChange={(v) => setNewJoinKey(prev => ({ ...prev, targetEntityId: v }))}>
+                    <SelectTrigger data-testid="select-target-entity">
+                      <SelectValue placeholder="Select target" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {entities.map(e => (
+                        <SelectItem key={e.entityId} value={e.entityId}>{e.displayName}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Source Field</Label>
+                  <Input
+                    placeholder="e.g. inventSerialId"
+                    value={newJoinKey.sourceField}
+                    onChange={(e) => setNewJoinKey(prev => ({ ...prev, sourceField: e.target.value }))}
+                    data-testid="input-source-field"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Target Field</Label>
+                  <Input
+                    placeholder="e.g. serialId"
+                    value={newJoinKey.targetField}
+                    onChange={(e) => setNewJoinKey(prev => ({ ...prev, targetField: e.target.value }))}
+                    data-testid="input-target-field"
+                  />
+                </div>
+                <div className="col-span-2 space-y-1">
+                  <Label className="text-xs">Join Key Name</Label>
+                  <Input
+                    placeholder="e.g. Serial ID Match"
+                    value={newJoinKey.name}
+                    onChange={(e) => setNewJoinKey(prev => ({ ...prev, name: e.target.value }))}
+                    data-testid="input-join-key-name"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={newJoinKey.isDefault}
+                    onCheckedChange={(checked) => setNewJoinKey(prev => ({ ...prev, isDefault: checked }))}
+                    data-testid="switch-new-default"
+                  />
+                  <Label className="text-xs">Set as default</Label>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => createJoinKeyMutation.mutate(newJoinKey)}
+                  disabled={!newJoinKey.sourceEntityId || !newJoinKey.targetEntityId || !newJoinKey.name || !newJoinKey.sourceField || !newJoinKey.targetField}
+                  data-testid="button-add-join-key"
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Add Join Key
+                </Button>
+              </div>
+            </div>
+
+            {joinKeys.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No join keys configured</p>
+            ) : (
+              <div className="space-y-2">
+                {joinKeys.map((jk) => (
+                  <div
+                    key={jk.id}
+                    className="flex items-center justify-between gap-2 p-3 rounded-md bg-muted/30 flex-wrap"
+                    data-testid={`joinkey-row-${jk.id}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Link2 className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="font-medium text-sm">{jk.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {jk.sourceEntityId}.{jk.sourceField} = {jk.targetEntityId}.{jk.targetField}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {jk.isDefault === 'true' && (
+                        <Badge variant="default" className="text-xs">Default</Badge>
+                      )}
+                      {jk.isDefault !== 'true' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setDefaultMutation.mutate({ id: jk.id, isDefault: true })}
+                          data-testid={`button-set-default-${jk.id}`}
+                        >
+                          Set Default
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => deleteJoinKeyMutation.mutate(jk.id)}
+                        data-testid={`button-delete-joinkey-${jk.id}`}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
   );
 }
