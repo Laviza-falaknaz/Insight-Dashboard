@@ -941,15 +941,21 @@ export default function DataTablePage() {
       measures,
       filters,
       sorts,
-      relationships: selectedEntities.includes('returns') && joinType !== 'none' && joinConditions.length > 0 ? 
-        [{
-          id: 'rel-1',
-          leftEntity: 'inventory' as QueryEntity,
-          rightEntity: 'returns' as QueryEntity,
-          joinType: joinType as JoinType,
-          conditions: joinConditions,
-          enabled: true
-        }] : [],
+      relationships: (() => {
+        // Filter out incomplete conditions (require both leftField and rightField)
+        const validConditions = joinConditions.filter(c => c.leftField && c.rightField);
+        if (selectedEntities.includes('returns') && joinType !== 'none' && validConditions.length > 0) {
+          return [{
+            id: 'rel-1',
+            leftEntity: 'inventory' as QueryEntity,
+            rightEntity: 'returns' as QueryEntity,
+            joinType: joinType as JoinType,
+            conditions: validConditions,
+            enabled: true
+          }];
+        }
+        return [];
+      })(),
       limit,
     };
   };

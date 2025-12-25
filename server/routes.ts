@@ -4181,8 +4181,13 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       if (hasReturns && config.relationships.length > 0) {
         const rel = config.relationships[0];
         
-        // Only process enabled relationships with conditions
-        if (rel.enabled && rel.conditions && rel.conditions.length > 0) {
+        // Filter out incomplete conditions server-side (safety net)
+        const validConditions = (rel.conditions || []).filter(
+          (c: any) => c.leftField && c.rightField
+        );
+        
+        // Only process enabled relationships with valid conditions
+        if (rel.enabled && validConditions.length > 0) {
           // Map join type to SQL
           let joinSQL = '';
           switch (rel.joinType) {
@@ -4208,7 +4213,7 @@ Be specific with numbers and percentages when available. Prioritize actionable r
           
           // Build ON conditions from user-defined field mappings
           const onConditions: string[] = [];
-          for (const cond of rel.conditions) {
+          for (const cond of validConditions) {
             const leftCol = fieldToColumn(rel.leftEntity, cond.leftField);
             const rightCol = fieldToColumn(rel.rightEntity, cond.rightField);
             const comparator = cond.comparator || '=';
@@ -4241,9 +4246,10 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       // Add EXISTS subquery if join type is 'exists'
       if (hasReturns && config.relationships.length > 0) {
         const rel = config.relationships[0];
-        if (rel.enabled && rel.joinType === 'exists' && rel.conditions && rel.conditions.length > 0) {
+        const validExistsConditions = (rel.conditions || []).filter((c: any) => c.leftField && c.rightField);
+        if (rel.enabled && rel.joinType === 'exists' && validExistsConditions.length > 0) {
           const existsConditions: string[] = [];
-          for (const cond of rel.conditions) {
+          for (const cond of validExistsConditions) {
             const leftCol = fieldToColumn(rel.leftEntity, cond.leftField);
             const rightCol = cond.rightField.replace(/^r\./, 're.');
             existsConditions.push(`${leftCol} ${cond.comparator || '='} re.${rightCol.replace('r.', '')}`);
