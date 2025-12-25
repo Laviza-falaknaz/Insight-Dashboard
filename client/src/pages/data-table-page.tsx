@@ -608,27 +608,26 @@ function DataSourcePanel({
 
   const ColumnItem = ({ col }: { col: QueryColumn }) => (
     <div 
-      className="group flex items-center gap-1.5 px-2 py-1.5 rounded text-xs hover-elevate cursor-grab active:cursor-grabbing border border-transparent hover:border-border/50"
+      className="group flex items-center gap-1 px-1 py-0.5 rounded text-[11px] hover-elevate cursor-grab active:cursor-grabbing"
       draggable
       onDragStart={(e) => handleDragStart(e, col)}
       data-testid={`draggable-field-${col.entity}-${col.field}`}
     >
-      <GripVertical className="h-3 w-3 text-muted-foreground/40 group-hover:text-muted-foreground" />
       {getFieldIcon(col)}
-      <span className="flex-1 truncate">{col.label}</span>
-      <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToRows(col)} title="Add to Rows" aria-label="Add to Rows">
-          <Rows3 className="h-3 w-3" />
-        </Button>
-        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToColumns(col)} title="Add to Columns" aria-label="Add to Columns">
-          <Columns className="h-3 w-3" />
-        </Button>
-        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToValues(col)} title="Add to Values" aria-label="Add to Values">
-          <Hash className="h-3 w-3" />
-        </Button>
-        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => onAddToFilters(col)} title="Add to Filters" aria-label="Add to Filters">
-          <Filter className="h-3 w-3" />
-        </Button>
+      <span className="flex-1 truncate text-muted-foreground group-hover:text-foreground">{col.field}</span>
+      <div className="flex gap-0.5">
+        <span role="button" className="p-0.5 rounded hover:bg-muted" onClick={(e) => { e.stopPropagation(); onAddToRows(col); }} title="Rows">
+          <Rows3 className="h-2.5 w-2.5 text-muted-foreground/60 hover:text-foreground" />
+        </span>
+        <span role="button" className="p-0.5 rounded hover:bg-muted" onClick={(e) => { e.stopPropagation(); onAddToColumns(col); }} title="Columns">
+          <Columns className="h-2.5 w-2.5 text-muted-foreground/60 hover:text-foreground" />
+        </span>
+        <span role="button" className="p-0.5 rounded hover:bg-muted" onClick={(e) => { e.stopPropagation(); onAddToValues(col); }} title="Values">
+          <Hash className="h-2.5 w-2.5 text-muted-foreground/60 hover:text-foreground" />
+        </span>
+        <span role="button" className="p-0.5 rounded hover:bg-muted" onClick={(e) => { e.stopPropagation(); onAddToFilters(col); }} title="Filters">
+          <Filter className="h-2.5 w-2.5 text-muted-foreground/60 hover:text-foreground" />
+        </span>
       </div>
     </div>
   );
@@ -650,21 +649,21 @@ function DataSourcePanel({
 
   return (
     <div className="h-full flex flex-col">
-      <div className="p-2 border-b">
+      <div className="px-1.5 py-1 border-b">
         <div className="relative">
-          <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-muted-foreground" />
+          <Search className="absolute left-1.5 top-1 h-3 w-3 text-muted-foreground" />
           <Input
-            placeholder="Search fields..."
+            placeholder="Search..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-7 h-7 text-xs"
+            className="pl-5 h-5 text-[10px]"
             data-testid="input-search-fields"
           />
         </div>
       </div>
       
       <ScrollArea className="flex-1">
-        <div className="p-2 space-y-1">
+        <div className="p-1 space-y-0.5">
           {entities.map((entity) => {
             const isSelected = selectedEntities.includes(entity.id);
             const isExpanded = expandedEntities.has(entity.id);
@@ -678,13 +677,13 @@ function DataSourcePanel({
                     toggleExpanded(entity.id);
                     if (!isSelected) onEntityToggle(entity.id);
                   }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-medium transition-colors hover-elevate ${
+                  className={`w-full flex items-center gap-1.5 px-2 py-1 text-xs font-medium transition-colors hover-elevate ${
                     isExpanded ? 'bg-muted/80' : 'bg-muted/30'
                   }`}
                   style={{ borderLeft: `3px solid ${entity.color || '#888'}` }}
                   data-testid={`button-source-${entity.id}`}
                 >
-                  {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                  {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                   {getEntityIcon(entity.icon)}
                   <span className="flex-1 text-left">{entity.name}</span>
                   <span className="text-[10px] text-muted-foreground">{entityColumns.length}</span>
@@ -694,25 +693,25 @@ function DataSourcePanel({
                   {isSelected && !isPrimary && (
                     <span
                       role="button"
-                      className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-destructive/20 transition-colors"
+                      className="inline-flex items-center justify-center h-4 w-4 rounded hover:bg-destructive/20 transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
                         onEntityToggle(entity.id);
                       }}
                       data-testid={`button-remove-${entity.id}`}
                     >
-                      <X className="h-3 w-3" />
+                      <X className="h-2.5 w-2.5" />
                     </span>
                   )}
                 </button>
                 
                 {isExpanded && (
                   <div className="border-t bg-background/50">
-                    <div className="max-h-[200px] overflow-y-auto">
+                    <div className="max-h-[50vh] overflow-y-auto">
                       {entityColumns.length === 0 ? (
-                        <p className="p-3 text-[10px] text-muted-foreground text-center">No fields match search</p>
+                        <p className="py-1 text-[10px] text-muted-foreground text-center">No fields match search</p>
                       ) : (
-                        <div className="p-1 space-y-0.5">
+                        <div className="py-0.5">
                           {entityColumns.map(col => (
                             <ColumnItem key={`${col.entity}-${col.field}`} col={col} />
                           ))}
@@ -854,10 +853,6 @@ function DataSourcePanel({
           )}
         </div>
       </ScrollArea>
-      
-      <div className="p-2 border-t text-[10px] text-muted-foreground text-center">
-        Drag fields to workspace or click icons
-      </div>
     </div>
   );
 }
