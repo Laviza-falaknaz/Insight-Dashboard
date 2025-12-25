@@ -1015,3 +1015,207 @@ export interface StrategicDashboardData {
     margin: number;
   }[];
 }
+
+// ========== PREDICTIVE ANALYTICS TYPES ==========
+
+// Time-series data point for forecasting
+export interface ForecastDataPoint {
+  period: string; // e.g., "2024-01", "2024-Q1", "Week 1"
+  actual: number | null;
+  predicted: number | null;
+  lowerBound?: number;
+  upperBound?: number;
+  isForecasted: boolean;
+}
+
+// Trend direction and strength
+export interface TrendAnalysis {
+  direction: 'increasing' | 'decreasing' | 'stable' | 'volatile';
+  strength: number; // 0-100 confidence
+  changePercent: number;
+  periodOverPeriod: number; // e.g., month-over-month change
+  description: string;
+}
+
+// Seasonal pattern detection
+export interface SeasonalPattern {
+  detected: boolean;
+  peakPeriods: string[];
+  troughPeriods: string[];
+  seasonalityStrength: number; // 0-1
+  description: string;
+}
+
+// Moving average calculation
+export interface MovingAverageResult {
+  period: string;
+  value: number;
+  ma3: number | null; // 3-period moving average
+  ma6: number | null; // 6-period moving average
+  ma12: number | null; // 12-period moving average
+}
+
+// Revenue forecast
+export interface RevenueForecast {
+  historicalData: ForecastDataPoint[];
+  forecastData: ForecastDataPoint[];
+  trend: TrendAnalysis;
+  seasonality: SeasonalPattern;
+  movingAverages: MovingAverageResult[];
+  nextPeriodPrediction: number;
+  nextQuarterPrediction: number;
+  confidenceLevel: number;
+  modelAccuracy: number; // Historical accuracy as percentage
+}
+
+// Sales volume forecast
+export interface SalesVolumeForecast {
+  historicalData: ForecastDataPoint[];
+  forecastData: ForecastDataPoint[];
+  trend: TrendAnalysis;
+  seasonality: SeasonalPattern;
+  byCategory: {
+    category: string;
+    currentTrend: TrendAnalysis;
+    nextPeriodForecast: number;
+    growthRate: number;
+  }[];
+  byMake: {
+    make: string;
+    currentTrend: TrendAnalysis;
+    nextPeriodForecast: number;
+    growthRate: number;
+  }[];
+}
+
+// Return rate prediction
+export interface ReturnRateForecast {
+  historicalData: ForecastDataPoint[];
+  forecastData: ForecastDataPoint[];
+  trend: TrendAnalysis;
+  currentRate: number;
+  predictedRate: number;
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  byCategory: {
+    category: string;
+    currentRate: number;
+    predictedRate: number;
+    trend: 'improving' | 'stable' | 'worsening';
+  }[];
+  contributingFactors: {
+    factor: string;
+    impact: number; // positive means increases return rate
+    description: string;
+  }[];
+}
+
+// Profit margin forecast
+export interface MarginForecast {
+  historicalData: ForecastDataPoint[];
+  forecastData: ForecastDataPoint[];
+  trend: TrendAnalysis;
+  currentMargin: number;
+  predictedMargin: number;
+  marginPressureRisk: 'low' | 'medium' | 'high';
+  byCategory: {
+    category: string;
+    currentMargin: number;
+    predictedMargin: number;
+    trend: 'improving' | 'stable' | 'declining';
+  }[];
+  costPressureFactors: {
+    costType: string;
+    currentContribution: number;
+    projectedContribution: number;
+    trend: 'increasing' | 'stable' | 'decreasing';
+  }[];
+}
+
+// Customer behavior prediction
+export interface CustomerForecast {
+  totalActiveCustomers: number;
+  predictedNewCustomers: number;
+  churnRisk: {
+    atRiskCount: number;
+    atRiskRevenue: number;
+    customers: {
+      customer: string;
+      lastOrder: string;
+      daysSinceLast: number;
+      historicalRevenue: number;
+      churnProbability: number;
+    }[];
+  };
+  topGrowthCustomers: {
+    customer: string;
+    currentRevenue: number;
+    projectedRevenue: number;
+    growthRate: number;
+  }[];
+  revenueConcentrationRisk: {
+    top5Percentage: number;
+    trend: 'increasing' | 'stable' | 'decreasing';
+    recommendation: string;
+  };
+}
+
+// Inventory turnover prediction
+export interface InventoryForecast {
+  currentTurnoverDays: number;
+  predictedTurnoverDays: number;
+  trend: TrendAnalysis;
+  stockoutRisk: {
+    riskLevel: 'low' | 'medium' | 'high';
+    itemsAtRisk: number;
+    estimatedLostRevenue: number;
+  };
+  overstockRisk: {
+    riskLevel: 'low' | 'medium' | 'high';
+    overstockedValue: number;
+    recommendations: string[];
+  };
+  byCategory: {
+    category: string;
+    currentDays: number;
+    predictedDays: number;
+    trend: 'improving' | 'stable' | 'worsening';
+  }[];
+}
+
+// Complete predictive analytics dashboard
+export interface PredictiveAnalyticsDashboard {
+  generatedAt: string;
+  forecastPeriod: string; // e.g., "Next 3 months"
+  dataQuality: {
+    historicalMonths: number;
+    dataCompleteness: number;
+    reliabilityScore: number;
+  };
+  
+  // Core forecasts
+  revenueForecast: RevenueForecast;
+  salesVolumeForecast: SalesVolumeForecast;
+  returnRateForecast: ReturnRateForecast;
+  marginForecast: MarginForecast;
+  customerForecast: CustomerForecast;
+  inventoryForecast: InventoryForecast;
+  
+  // Key predictions summary
+  keyPredictions: {
+    metric: string;
+    currentValue: number;
+    predictedValue: number;
+    changePercent: number;
+    confidence: number;
+    direction: 'up' | 'down' | 'stable';
+    impact: 'positive' | 'negative' | 'neutral';
+  }[];
+  
+  // AI-generated insights
+  aiInsights?: {
+    summary: string;
+    opportunities: string[];
+    risks: string[];
+    recommendations: string[];
+  };
+}
