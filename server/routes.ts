@@ -4115,8 +4115,10 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       // Check sorts (sorts use columnId which references dimensions/measures by alias)
       // Sorts don't directly reference entities, they reference dimension/measure aliases
       
-      // Validate: if returns is referenced, we need a valid join that actually creates the alias
+      // Validate: if BOTH entities are referenced, we need a valid join
       const returnsReferenced = referencedEntities.has('returns');
+      const inventoryReferenced = referencedEntities.has('inventory');
+      const bothEntitiesReferenced = returnsReferenced && inventoryReferenced;
       const hasRelationship = config.relationships.length > 0;
       const rel = hasRelationship ? config.relationships[0] : null;
       const hasValidConditions = rel && rel.enabled && 
@@ -4128,21 +4130,22 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       const aliasCreatingTypes = ['inner', 'left', 'right', 'first'];
       const joinsCreatesAlias = hasValidConditions && aliasCreatingTypes.includes(joinType || '');
       
-      if (returnsReferenced && !joinsCreatesAlias) {
+      // Only require join when BOTH entities are referenced
+      if (bothEntitiesReferenced && !joinsCreatesAlias) {
         if (joinType === 'exists') {
           return res.status(400).json({ 
-            error: "The 'Exists' join type cannot be used when selecting Returns columns. Use 'Inner', 'Left', 'Right', or 'First Match' join instead.",
+            error: "The 'Exists' join type cannot be used when selecting columns from both tables. Use 'Inner', 'Left', 'Right', or 'First Match' join instead.",
             code: "EXISTS_JOIN_INVALID"
           });
         }
         if (!joinType || (joinType as string) === 'none') {
           return res.status(400).json({ 
-            error: "Returns columns require a join. Please select a join type and configure field mappings.",
+            error: "When using both Inventory and Returns columns, please select a join type and configure field mappings.",
             code: "NO_JOIN_TYPE"
           });
         }
         return res.status(400).json({ 
-          error: "Returns columns require a configured join. Please set up join conditions in the Join Builder section.",
+          error: "When using both tables, please configure join conditions in the relationship section.",
           code: "MISSING_JOIN"
         });
       }
@@ -4240,7 +4243,9 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       }
 
       // Build FROM clause with dynamic JOIN construction
-      let fromClause = 'FROM inventory i';
+      // If only returns is referenced (no inventory), use returns as primary table
+      const onlyReturnsReferenced = returnsReferenced && !inventoryReferenced;
+      let fromClause = onlyReturnsReferenced ? 'FROM returns r' : 'FROM inventory i';
       const hasReturns = config.entities.includes('returns');
       let joinWarnings: string[] = [];
       

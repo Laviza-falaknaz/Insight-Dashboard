@@ -510,12 +510,6 @@ function DataSourcePanel({
   onAddToColumns,
   onAddToValues,
   onAddToFilters,
-  joinType,
-  onJoinTypeChange,
-  joinConditions,
-  onJoinConditionsChange,
-  primaryEntity,
-  onPrimaryEntityChange,
 }: {
   columnsData: { 
     inventory: QueryColumn[]; 
@@ -529,16 +523,9 @@ function DataSourcePanel({
   onAddToColumns: (col: QueryColumn) => void;
   onAddToValues: (col: QueryColumn) => void;
   onAddToFilters: (col: QueryColumn) => void;
-  joinType: JoinType | 'none';
-  onJoinTypeChange: (type: JoinType | 'none') => void;
-  joinConditions: JoinCondition[];
-  onJoinConditionsChange: (conditions: JoinCondition[]) => void;
-  primaryEntity: QueryEntity;
-  onPrimaryEntityChange: (entity: QueryEntity) => void;
 }) {
   const [expandedEntities, setExpandedEntities] = useState<Set<QueryEntity>>(new Set(['returns' as QueryEntity]));
   const [searchTerm, setSearchTerm] = useState("");
-  const [showJoinConfig, setShowJoinConfig] = useState(false);
 
   const entities = columnsData?.entities || [
     { id: 'returns' as QueryEntity, name: 'Returns', icon: 'RotateCcw', color: '#f59e0b' },
@@ -554,8 +541,6 @@ function DataSourcePanel({
     }
     setExpandedEntities(newExpanded);
   };
-
-  const relationships = columnsData?.relationships || [];
 
   const filterColumns = (columns: QueryColumn[]) => {
     if (!searchTerm) return columns;
@@ -578,19 +563,6 @@ function DataSourcePanel({
     e.dataTransfer.effectAllowed = 'copy';
   };
 
-  const hasValidJoin = joinType !== 'none' && joinConditions.some(c => c.leftField && c.rightField);
-  const hasMultipleEntities = selectedEntities.length > 1;
-
-  const getActiveRelationship = (): RelationshipMeta | undefined => {
-    if (selectedEntities.length < 2) return undefined;
-    return relationships.find(r => 
-      (selectedEntities.includes(r.sourceEntity) && selectedEntities.includes(r.targetEntity)) ||
-      (r.bidirectional && selectedEntities.includes(r.targetEntity) && selectedEntities.includes(r.sourceEntity))
-    );
-  };
-
-  const activeRelationship = getActiveRelationship();
-
   const getColumnsForEntity = (entity: QueryEntity): QueryColumn[] => {
     if (!columnsData) return [];
     const columnsByEntity: Record<string, QueryColumn[]> = {
@@ -599,12 +571,6 @@ function DataSourcePanel({
     };
     return columnsByEntity[entity] || [];
   };
-
-  const getSecondaryEntity = (): QueryEntity | undefined => {
-    return selectedEntities.find(e => e !== primaryEntity);
-  };
-
-  const secondaryEntity = getSecondaryEntity();
 
   const ColumnItem = ({ col }: { col: QueryColumn }) => (
     <div 
@@ -632,21 +598,6 @@ function DataSourcePanel({
     </div>
   );
 
-  const getJoinLabel = (type: JoinType | 'none'): string => {
-    const primaryName = entities.find(e => e.id === primaryEntity)?.name || 'Primary';
-    const secondaryName = secondaryEntity ? (entities.find(e => e.id === secondaryEntity)?.name || 'Secondary') : 'Secondary';
-    
-    switch (type) {
-      case 'none': return 'No Link';
-      case 'left': return `Include All ${primaryName}`;
-      case 'inner': return 'Only Matching Records';
-      case 'right': return `Include All ${secondaryName}`;
-      case 'first': return 'First Match Only';
-      case 'exists': return 'Check If Exists';
-      default: return type;
-    }
-  };
-
   return (
     <div className="h-full flex flex-col">
       <div className="px-1.5 py-1 border-b">
@@ -667,7 +618,6 @@ function DataSourcePanel({
           {entities.map((entity) => {
             const isSelected = selectedEntities.includes(entity.id);
             const isExpanded = expandedEntities.has(entity.id);
-            const isPrimary = primaryEntity === entity.id;
             const entityColumns = filterColumns(getColumnsForEntity(entity.id));
             
             return (
@@ -687,10 +637,7 @@ function DataSourcePanel({
                   {getEntityIcon(entity.icon)}
                   <span className="flex-1 text-left">{entity.name}</span>
                   <span className="text-[10px] text-muted-foreground">{entityColumns.length}</span>
-                  {isPrimary && hasMultipleEntities && (
-                    <Badge variant="secondary" className="text-[9px] px-1 py-0">Primary</Badge>
-                  )}
-                  {isSelected && !isPrimary && (
+                  {isSelected && selectedEntities.length > 1 && (
                     <span
                       role="button"
                       className="inline-flex items-center justify-center h-4 w-4 rounded hover:bg-destructive/20 transition-colors"
@@ -724,133 +671,6 @@ function DataSourcePanel({
             );
           })}
           
-          {hasMultipleEntities && activeRelationship && (
-            <div 
-              className={`mt-2 p-2 rounded-md border cursor-pointer transition-colors ${
-                hasValidJoin 
-                  ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800' 
-                  : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800'
-              }`}
-              onClick={() => setShowJoinConfig(!showJoinConfig)}
-              data-testid="button-toggle-join-config"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className={`h-2 w-2 rounded-full ${hasValidJoin ? 'bg-green-500' : 'bg-amber-500'}`} />
-                  <span className="text-xs font-medium flex items-center gap-1">
-                    {entities.find(e => e.id === primaryEntity)?.name}
-                    <ArrowLeftRight className="h-3 w-3" />
-                    {entities.find(e => e.id === secondaryEntity)?.name}
-                  </span>
-                </div>
-                {showJoinConfig ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              </div>
-              
-              {showJoinConfig && (
-                <div className="mt-3 space-y-3" onClick={e => e.stopPropagation()}>
-                  {activeRelationship.bidirectional && (
-                    <div className="flex gap-2 items-center flex-wrap">
-                      <span className="text-[10px] text-muted-foreground">Direction:</span>
-                      <Button 
-                        variant={primaryEntity === activeRelationship.sourceEntity ? 'default' : 'outline'}
-                        size="sm"
-                        className="h-6 text-[10px] px-2"
-                        onClick={() => onPrimaryEntityChange(activeRelationship.sourceEntity)}
-                      >
-                        {entities.find(e => e.id === activeRelationship.sourceEntity)?.name} First
-                      </Button>
-                      <Button 
-                        variant={primaryEntity === activeRelationship.targetEntity ? 'default' : 'outline'}
-                        size="sm"
-                        className="h-6 text-[10px] px-2"
-                        onClick={() => onPrimaryEntityChange(activeRelationship.targetEntity)}
-                      >
-                        {entities.find(e => e.id === activeRelationship.targetEntity)?.name} First
-                      </Button>
-                    </div>
-                  )}
-
-                  <Select value={joinType} onValueChange={(v) => onJoinTypeChange(v as JoinType | 'none')}>
-                    <SelectTrigger className="h-8 text-xs" data-testid="select-join-type">
-                      <SelectValue placeholder="Select join type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No Link</SelectItem>
-                      {activeRelationship.supportedJoinTypes.map(type => (
-                        <SelectItem key={type} value={type}>{getJoinLabel(type)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  
-                  {joinType !== 'none' && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Match Fields</span>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="h-5 px-1.5 text-[10px]"
-                          onClick={() => onJoinConditionsChange([...joinConditions, { leftField: '', rightField: '', comparator: '=' }])}
-                          data-testid="button-add-join-condition"
-                        >
-                          <Plus className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      
-                      {joinConditions.length === 0 && (
-                        <p className="text-[10px] text-muted-foreground">
-                          Add fields to match records
-                        </p>
-                      )}
-                      
-                      {joinConditions.map((cond, idx) => (
-                        <div key={idx} className="flex items-center gap-1">
-                          <Select value={cond.leftField} onValueChange={(v) => {
-                            const updated = [...joinConditions];
-                            updated[idx] = { ...cond, leftField: v };
-                            onJoinConditionsChange(updated);
-                          }}>
-                            <SelectTrigger className="h-6 text-[10px] flex-1" data-testid={`select-left-field-${idx}`}>
-                              <SelectValue placeholder={entities.find(e => e.id === primaryEntity)?.name} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {getColumnsForEntity(primaryEntity).map(col => (
-                                <SelectItem key={col.field} value={col.field} className="text-xs">{col.label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <span className="text-[10px] text-muted-foreground">=</span>
-                          <Select value={cond.rightField} onValueChange={(v) => {
-                            const updated = [...joinConditions];
-                            updated[idx] = { ...cond, rightField: v };
-                            onJoinConditionsChange(updated);
-                          }}>
-                            <SelectTrigger className="h-6 text-[10px] flex-1" data-testid={`select-right-field-${idx}`}>
-                              <SelectValue placeholder={entities.find(e => e.id === secondaryEntity)?.name} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {secondaryEntity && getColumnsForEntity(secondaryEntity).map(col => (
-                                <SelectItem key={col.field} value={col.field} className="text-xs">{col.label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            className="h-5 w-5 p-0"
-                            onClick={() => onJoinConditionsChange(joinConditions.filter((_, i) => i !== idx))}
-                            data-testid={`button-remove-condition-${idx}`}
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </ScrollArea>
     </div>
@@ -876,6 +696,7 @@ export default function DataTablePage() {
   const [joinType, setJoinType] = useState<JoinType | 'none'>('none');
   const [joinConditions, setJoinConditions] = useState<JoinCondition[]>([]);
   const [dragOverZone, setDragOverZone] = useState<string | null>(null);
+  const [showJoinConfig, setShowJoinConfig] = useState(false);
 
   const { data: columnsData, isLoading: columnsLoading } = useQuery<{
     inventory: QueryColumn[];
@@ -945,6 +766,45 @@ export default function DataTablePage() {
       setSelectedEntities(selectedEntities.filter(e => e !== entity));
     } else {
       setSelectedEntities([...selectedEntities, entity]);
+    }
+  };
+
+  const entities = columnsData?.entities || [];
+  const relationships = columnsData?.relationships || [];
+  const hasMultipleEntities = selectedEntities.length > 1;
+  const hasValidJoin = joinType !== 'none' && joinConditions.some(c => c.leftField && c.rightField);
+  
+  const getActiveRelationship = () => {
+    if (selectedEntities.length < 2) return undefined;
+    return relationships.find(r => 
+      (selectedEntities.includes(r.sourceEntity) && selectedEntities.includes(r.targetEntity)) ||
+      (r.bidirectional && selectedEntities.includes(r.targetEntity) && selectedEntities.includes(r.sourceEntity))
+    );
+  };
+  
+  const activeRelationship = getActiveRelationship();
+  const secondaryEntity = selectedEntities.find(e => e !== primaryEntity);
+  
+  const getColumnsForEntity = (entity: QueryEntity): QueryColumn[] => {
+    if (!columnsData) return [];
+    const columnsByEntity: Record<string, QueryColumn[]> = {
+      inventory: columnsData.inventory || [],
+      returns: columnsData.returns || [],
+    };
+    return columnsByEntity[entity] || [];
+  };
+
+  const getJoinLabel = (type: JoinType | 'none'): string => {
+    const primaryName = entities.find(e => e.id === primaryEntity)?.name || 'Primary';
+    const secondaryName = secondaryEntity ? (entities.find(e => e.id === secondaryEntity)?.name || 'Secondary') : 'Secondary';
+    switch (type) {
+      case 'none': return 'No Link';
+      case 'left': return `All ${primaryName}`;
+      case 'inner': return 'Matching Only';
+      case 'right': return `All ${secondaryName}`;
+      case 'first': return 'First Match';
+      case 'exists': return 'Check Exists';
+      default: return type;
     }
   };
 
@@ -1328,12 +1188,6 @@ export default function DataTablePage() {
             onAddToColumns={addToColumns}
             onAddToValues={addToValues}
             onAddToFilters={addToFilters}
-            joinType={joinType}
-            onJoinTypeChange={setJoinType}
-            joinConditions={joinConditions}
-            onJoinConditionsChange={setJoinConditions}
-            primaryEntity={primaryEntity}
-            onPrimaryEntityChange={setPrimaryEntity}
           />
         </div>
 
@@ -1457,6 +1311,140 @@ export default function DataTablePage() {
                   )}
                 </div>
               </div>
+
+              {hasMultipleEntities && activeRelationship && (
+                <div className="min-w-[180px]">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <ArrowLeftRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-[11px] font-medium">Relationship</span>
+                  </div>
+                  <div 
+                    className={`min-h-[50px] p-2 border rounded-md cursor-pointer transition-colors ${
+                      hasValidJoin 
+                        ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800' 
+                        : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800'
+                    }`}
+                    onClick={() => setShowJoinConfig(!showJoinConfig)}
+                    data-testid="button-toggle-join-config"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className={`h-2 w-2 rounded-full ${hasValidJoin ? 'bg-green-500' : 'bg-amber-500'}`} />
+                        <span className="text-xs font-medium flex items-center gap-1">
+                          {entities.find(e => e.id === primaryEntity)?.name}
+                          <ArrowLeftRight className="h-3 w-3" />
+                          {entities.find(e => e.id === secondaryEntity)?.name}
+                        </span>
+                      </div>
+                      {showJoinConfig ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                    </div>
+                    
+                    {showJoinConfig && (
+                      <div className="mt-3 space-y-3" onClick={e => e.stopPropagation()}>
+                        {activeRelationship.bidirectional && (
+                          <div className="flex gap-2 items-center flex-wrap">
+                            <span className="text-[10px] text-muted-foreground">Direction:</span>
+                            <Button 
+                              variant={primaryEntity === activeRelationship.sourceEntity ? 'default' : 'outline'}
+                              size="sm"
+                              className="h-6 text-[10px] px-2"
+                              onClick={() => setPrimaryEntity(activeRelationship.sourceEntity)}
+                            >
+                              {entities.find(e => e.id === activeRelationship.sourceEntity)?.name} First
+                            </Button>
+                            <Button 
+                              variant={primaryEntity === activeRelationship.targetEntity ? 'default' : 'outline'}
+                              size="sm"
+                              className="h-6 text-[10px] px-2"
+                              onClick={() => setPrimaryEntity(activeRelationship.targetEntity)}
+                            >
+                              {entities.find(e => e.id === activeRelationship.targetEntity)?.name} First
+                            </Button>
+                          </div>
+                        )}
+
+                        <Select value={joinType} onValueChange={(v) => setJoinType(v as JoinType | 'none')}>
+                          <SelectTrigger className="h-8 text-xs" data-testid="select-join-type">
+                            <SelectValue placeholder="Select join type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No Link</SelectItem>
+                            {activeRelationship.supportedJoinTypes.map(type => (
+                              <SelectItem key={type} value={type}>{getJoinLabel(type)}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        
+                        {joinType !== 'none' && (
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Match Fields</span>
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="h-5 px-1.5 text-[10px]"
+                                onClick={() => setJoinConditions([...joinConditions, { leftField: '', rightField: '', comparator: '=' }])}
+                                data-testid="button-add-join-condition"
+                              >
+                                <Plus className="h-3 w-3" />
+                              </Button>
+                            </div>
+                            
+                            {joinConditions.length === 0 && (
+                              <p className="text-[10px] text-muted-foreground">
+                                Add fields to match records
+                              </p>
+                            )}
+                            
+                            {joinConditions.map((cond, idx) => (
+                              <div key={idx} className="flex items-center gap-1">
+                                <Select value={cond.leftField} onValueChange={(v) => {
+                                  const updated = [...joinConditions];
+                                  updated[idx] = { ...cond, leftField: v };
+                                  setJoinConditions(updated);
+                                }}>
+                                  <SelectTrigger className="h-6 text-[10px] flex-1" data-testid={`select-left-field-${idx}`}>
+                                    <SelectValue placeholder={entities.find(e => e.id === primaryEntity)?.name} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {getColumnsForEntity(primaryEntity).map(col => (
+                                      <SelectItem key={col.field} value={col.field} className="text-xs">{col.label}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <span className="text-[10px] text-muted-foreground">=</span>
+                                <Select value={cond.rightField} onValueChange={(v) => {
+                                  const updated = [...joinConditions];
+                                  updated[idx] = { ...cond, rightField: v };
+                                  setJoinConditions(updated);
+                                }}>
+                                  <SelectTrigger className="h-6 text-[10px] flex-1" data-testid={`select-right-field-${idx}`}>
+                                    <SelectValue placeholder={entities.find(e => e.id === secondaryEntity)?.name} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {secondaryEntity && getColumnsForEntity(secondaryEntity).map(col => (
+                                      <SelectItem key={col.field} value={col.field} className="text-xs">{col.label}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  className="h-5 w-5 p-0"
+                                  onClick={() => setJoinConditions(joinConditions.filter((_, i) => i !== idx))}
+                                  data-testid={`button-remove-condition-${idx}`}
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-4 pt-2 border-t mt-3">
