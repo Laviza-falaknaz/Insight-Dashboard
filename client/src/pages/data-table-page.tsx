@@ -536,7 +536,7 @@ function DataSourcePanel({
   primaryEntity: QueryEntity;
   onPrimaryEntityChange: (entity: QueryEntity) => void;
 }) {
-  const [expandedEntities, setExpandedEntities] = useState<Set<QueryEntity>>(new Set(['returns']));
+  const [expandedEntities, setExpandedEntities] = useState<Set<QueryEntity>>(new Set(['returns' as QueryEntity]));
   const [searchTerm, setSearchTerm] = useState("");
   const [showJoinConfig, setShowJoinConfig] = useState(false);
 
@@ -692,10 +692,9 @@ function DataSourcePanel({
                     <Badge variant="secondary" className="text-[9px] px-1 py-0">Primary</Badge>
                   )}
                   {isSelected && !isPrimary && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-5 w-5 p-0"
+                    <span
+                      role="button"
+                      className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-destructive/20 transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
                         onEntityToggle(entity.id);
@@ -703,7 +702,7 @@ function DataSourcePanel({
                       data-testid={`button-remove-${entity.id}`}
                     >
                       <X className="h-3 w-3" />
-                    </Button>
+                    </span>
                   )}
                 </button>
                 
