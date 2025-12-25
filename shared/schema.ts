@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, numeric, date, integer, serial, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, numeric, date, integer, serial, timestamp, index, uniqueIndex, jsonb, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1292,6 +1292,12 @@ export const insertEntityConfigSchema = createInsertSchema(entityConfigs).omit({
 export type InsertEntityConfig = z.infer<typeof insertEntityConfigSchema>;
 export type EntityConfig = typeof entityConfigs.$inferSelect;
 
+// Field pair type for multi-field joins
+export interface FieldPair {
+  sourceField: string;
+  targetField: string;
+}
+
 // Join key definitions between entities
 export const entityJoinKeys = pgTable("entity_join_keys", {
   id: serial("id").primaryKey(),
@@ -1300,6 +1306,8 @@ export const entityJoinKeys = pgTable("entity_join_keys", {
   name: text("name").notNull(),
   sourceField: text("source_field").notNull(),
   targetField: text("target_field").notNull(),
+  fieldPairs: jsonb("field_pairs").$type<FieldPair[]>(),
+  bidirectional: boolean("bidirectional").default(false),
   isDefault: text("is_default").default("false"),
   supportedJoinTypes: text("supported_join_types").default("inner,left,right"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -1315,8 +1323,8 @@ export interface JoinKeyConfig {
   sourceEntityId: string;
   targetEntityId: string;
   name: string;
-  sourceField: string;
-  targetField: string;
+  fieldPairs: FieldPair[];
+  bidirectional: boolean;
   isDefault: boolean;
   supportedJoinTypes: JoinType[];
 }
