@@ -1310,6 +1310,7 @@ export const entityJoinKeys = pgTable("entity_join_keys", {
   bidirectional: boolean("bidirectional").default(false),
   isDefault: text("is_default").default("false"),
   supportedJoinTypes: text("supported_join_types").default("inner,left,right"),
+  defaultJoinType: text("default_join_type").default("left"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

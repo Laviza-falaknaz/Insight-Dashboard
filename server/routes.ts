@@ -319,7 +319,7 @@ export async function registerRoutes(
   // Admin: Create join key
   app.post("/api/admin/join-keys", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { sourceEntityId, targetEntityId, name, fieldPairs, bidirectional, isDefault, supportedJoinTypes } = req.body;
+      const { sourceEntityId, targetEntityId, name, fieldPairs, bidirectional, isDefault, supportedJoinTypes, defaultJoinType } = req.body;
       
       // Validate fieldPairs
       if (!fieldPairs || !Array.isArray(fieldPairs) || fieldPairs.length === 0) {
@@ -353,7 +353,8 @@ export async function registerRoutes(
           fieldPairs: fieldPairs,
           bidirectional: bidirectional || false,
           isDefault: isDefault ? 'true' : 'false',
-          supportedJoinTypes: supportedJoinTypes || 'inner,left,right'
+          supportedJoinTypes: supportedJoinTypes || 'inner,left,right',
+          defaultJoinType: defaultJoinType || 'left'
         })
         .returning();
       
@@ -368,7 +369,7 @@ export async function registerRoutes(
   app.put("/api/admin/join-keys/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const { name, fieldPairs, bidirectional, isDefault, supportedJoinTypes } = req.body;
+      const { name, fieldPairs, bidirectional, isDefault, supportedJoinTypes, defaultJoinType } = req.body;
       
       // If setting as default, unset others
       if (isDefault) {
@@ -389,8 +390,13 @@ export async function registerRoutes(
       const updateData: Record<string, unknown> = { 
         name, 
         isDefault: isDefault ? 'true' : 'false',
-        supportedJoinTypes 
+        supportedJoinTypes
       };
+      
+      // Handle defaultJoinType
+      if (defaultJoinType) {
+        updateData.defaultJoinType = defaultJoinType;
+      }
       
       // Handle fieldPairs if provided
       if (fieldPairs && Array.isArray(fieldPairs) && fieldPairs.length > 0) {
@@ -4175,6 +4181,15 @@ Be specific with numbers and percentages when available. Prioritize actionable r
             ? jk.fieldPairs
             : [{ sourceField: jk.sourceField, targetField: jk.targetField }];
           
+          // Get supported join types
+          const supportedTypes = (jk.supportedJoinTypes || 'inner,left,right').split(',') as ('inner' | 'left' | 'right' | 'first' | 'exists')[];
+          
+          // Get default join type, ensuring it's in supported types
+          let defaultType = (jk.defaultJoinType || 'left') as 'inner' | 'left' | 'right' | 'first' | 'exists';
+          if (!supportedTypes.includes(defaultType)) {
+            defaultType = supportedTypes[0] || 'left';
+          }
+          
           return {
             id: `${jk.sourceEntityId}-${jk.targetEntityId}-${jk.id}`,
             sourceEntity: jk.sourceEntityId,
@@ -4183,10 +4198,10 @@ Be specific with numbers and percentages when available. Prioritize actionable r
             targetField: pairs[0].targetField,
             joinFields: pairs.map(p => ({ from: p.sourceField, to: p.targetField })),
             label: jk.name,
-            bidirectional: jk.bidirectional || false,
+            bidirectional: jk.bidirectional === true,
             isDefault: jk.isDefault === 'true',
-            defaultJoinType: 'left' as const,
-            supportedJoinTypes: (jk.supportedJoinTypes || 'inner,left,right').split(',') as ('inner' | 'left' | 'right' | 'first' | 'exists')[]
+            defaultJoinType: defaultType,
+            supportedJoinTypes: supportedTypes
           };
         })
       : [

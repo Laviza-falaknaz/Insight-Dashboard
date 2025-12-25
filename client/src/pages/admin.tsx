@@ -336,7 +336,9 @@ function EntityConfigManager() {
     name: "",
     fieldPairs: [{ sourceField: "", targetField: "" }] as FieldPair[],
     bidirectional: false,
-    isDefault: false
+    isDefault: false,
+    supportedJoinTypes: ["inner", "left", "right"] as string[],
+    defaultJoinType: "left"
   });
 
   const { data: adminData, isLoading } = useQuery<{ entities: EntityConfig[], joinKeys: JoinKey[] }>({
@@ -379,7 +381,8 @@ function EntityConfigManager() {
         fieldPairs: data.fieldPairs,
         bidirectional: data.bidirectional,
         isDefault: data.isDefault,
-        supportedJoinTypes: "inner,left,right"
+        supportedJoinTypes: data.supportedJoinTypes.join(","),
+        defaultJoinType: data.defaultJoinType
       });
     },
     onSuccess: () => {
@@ -391,7 +394,9 @@ function EntityConfigManager() {
         name: "", 
         fieldPairs: [{ sourceField: "", targetField: "" }],
         bidirectional: false,
-        isDefault: false 
+        isDefault: false,
+        supportedJoinTypes: ["inner", "left", "right"],
+        defaultJoinType: "left"
       });
       toast({ title: "Created", description: "Join key created successfully" });
     }
@@ -642,25 +647,73 @@ function EntityConfigManager() {
                 />
               </div>
 
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={newJoinKey.bidirectional}
-                      onCheckedChange={(checked) => setNewJoinKey(prev => ({ ...prev, bidirectional: checked }))}
-                      data-testid="switch-bidirectional"
-                    />
-                    <Label className="text-xs">Bidirectional</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={newJoinKey.isDefault}
-                      onCheckedChange={(checked) => setNewJoinKey(prev => ({ ...prev, isDefault: checked }))}
-                      data-testid="switch-new-default"
-                    />
-                    <Label className="text-xs">Set as default</Label>
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={newJoinKey.bidirectional}
+                    onCheckedChange={(checked) => setNewJoinKey(prev => ({ ...prev, bidirectional: checked }))}
+                    data-testid="switch-bidirectional"
+                  />
+                  <Label className="text-xs">Bidirectional</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={newJoinKey.isDefault}
+                    onCheckedChange={(checked) => setNewJoinKey(prev => ({ ...prev, isDefault: checked }))}
+                    data-testid="switch-new-default"
+                  />
+                  <Label className="text-xs">Set as default</Label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Supported Join Types</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {["inner", "left", "right", "first", "exists"].map((type) => (
+                      <Button
+                        key={type}
+                        size="sm"
+                        variant={newJoinKey.supportedJoinTypes.includes(type) ? "default" : "outline"}
+                        onClick={() => {
+                          setNewJoinKey(prev => {
+                            const types = prev.supportedJoinTypes.includes(type)
+                              ? prev.supportedJoinTypes.filter(t => t !== type)
+                              : [...prev.supportedJoinTypes, type];
+                            const newDefault = types.includes(prev.defaultJoinType) 
+                              ? prev.defaultJoinType 
+                              : types[0] || "left";
+                            return { ...prev, supportedJoinTypes: types, defaultJoinType: newDefault };
+                          });
+                        }}
+                        data-testid={`button-jointype-${type}`}
+                      >
+                        {type.toUpperCase()}
+                      </Button>
+                    ))}
                   </div>
                 </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Default Join Type</Label>
+                  <Select
+                    value={newJoinKey.defaultJoinType}
+                    onValueChange={(v) => setNewJoinKey(prev => ({ ...prev, defaultJoinType: v }))}
+                  >
+                    <SelectTrigger className="h-8" data-testid="select-default-join-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {newJoinKey.supportedJoinTypes.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {type.toUpperCase()} JOIN
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
                 <Button
                   size="sm"
                   onClick={() => createJoinKeyMutation.mutate(newJoinKey)}
@@ -668,7 +721,8 @@ function EntityConfigManager() {
                     !newJoinKey.sourceEntityId || 
                     !newJoinKey.targetEntityId || 
                     !newJoinKey.name || 
-                    newJoinKey.fieldPairs.some(p => !p.sourceField || !p.targetField)
+                    newJoinKey.fieldPairs.some(p => !p.sourceField || !p.targetField) ||
+                    newJoinKey.supportedJoinTypes.length === 0
                   }
                   data-testid="button-add-join-key"
                 >
