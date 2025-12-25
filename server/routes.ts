@@ -4677,8 +4677,12 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       // Build ORDER BY clause
       let orderByClause = '';
       if (config.sorts.length > 0) {
-        const sortParts = config.sorts.map(s => {
+        const sortParts = config.sorts.map((s: any) => {
           const dir = s.direction === 'desc' ? 'DESC' : 'ASC';
+          if (s.aggregation) {
+            const alias = `${s.aggregation.toUpperCase()}_${s.columnId}`;
+            return `"${alias}" ${dir}`;
+          }
           return `"${s.columnId}" ${dir}`;
         });
         orderByClause = `ORDER BY ${sortParts.join(', ')}`;

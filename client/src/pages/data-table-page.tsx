@@ -167,6 +167,7 @@ interface OrderByItem {
   field: string;
   label: string;
   direction: 'asc' | 'desc';
+  aggregation?: AggregationType;
 }
 
 interface RelationshipMeta {
@@ -369,6 +370,7 @@ export default function DataTablePage() {
       field: firstCol.field,
       label: firstCol.label,
       direction: 'asc',
+      aggregation: firstCol.aggregation,
     }]);
   };
 
@@ -432,6 +434,8 @@ export default function DataTablePage() {
       sorts: orderBy.map(o => ({
         columnId: o.field,
         direction: o.direction,
+        aggregation: o.aggregation,
+        entity: o.entity,
       })),
       relationships: (() => {
         if (!secondaryEntity || joinConditions.length === 0) return [];
@@ -518,7 +522,12 @@ export default function DataTablePage() {
     }
     
     if (orderBy.length > 0) {
-      sql += `\nORDER BY ${orderBy.map(o => `${o.entity}.${o.field} ${o.direction.toUpperCase()}`).join(', ')}`;
+      sql += `\nORDER BY ${orderBy.map(o => {
+        if (o.aggregation) {
+          return `"${o.aggregation.toUpperCase()}_${o.field}" ${o.direction.toUpperCase()}`;
+        }
+        return `${o.entity}.${o.field} ${o.direction.toUpperCase()}`;
+      }).join(', ')}`;
     }
     
     sql += `\nLIMIT ${limit}`;
@@ -1114,7 +1123,7 @@ export default function DataTablePage() {
                           const [entity, field] = v.split('.');
                           const col = selectedColumns.find(c => c.entity === entity && c.field === field);
                           if (col) {
-                            updateOrderBy(order.id, { entity: col.entity, field: col.field, label: col.label });
+                            updateOrderBy(order.id, { entity: col.entity, field: col.field, label: col.label, aggregation: col.aggregation });
                           }
                         }}
                       >
