@@ -15,7 +15,12 @@ import type {
   TopPerformer,
   AIInsightRequest,
   AIInsightResponse,
-  DrillDownConfig
+  DrillDownConfig,
+  QueryBuilderConfig,
+  QueryResult,
+  QueryColumn,
+  QueryAIInterpretation,
+  ChartConfig
 } from "@shared/schema";
 
 // Initialize OpenAI client (optional - only if API key is provided)
@@ -3845,6 +3850,358 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       res.status(500).json({ error: "Failed to delete collection" });
     }
   });
+
+  // ============================================
+  // QUERY BUILDER - Advanced BI query execution
+  // ============================================
+
+  // Get available columns for query builder
+  app.get("/api/query-builder/columns", requireAuth, async (_req: Request, res: Response) => {
+    const inventoryColumns: QueryColumn[] = [
+      { entity: 'inventory', field: 'category', label: 'Category', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'make', label: 'Make/Brand', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'modelNum', label: 'Model', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'invoicingName', label: 'Customer', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'vendName', label: 'Vendor', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'gradeCondition', label: 'Grade/Condition', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'status', label: 'Status', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'transType', label: 'Transaction Type', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'segregation', label: 'Region', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'processor', label: 'Processor', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'ram', label: 'RAM', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'hdd', label: 'Storage', type: 'text', aggregatable: false },
+      { entity: 'inventory', field: 'invoiceDate', label: 'Invoice Date', type: 'date', aggregatable: false },
+      { entity: 'inventory', field: 'salesOrderDate', label: 'Sales Order Date', type: 'date', aggregatable: false },
+      { entity: 'inventory', field: 'purchDate', label: 'Purchase Date', type: 'date', aggregatable: false },
+      { entity: 'inventory', field: 'finalSalesPriceUSD', label: 'Sales Price (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'finalTotalCostUSD', label: 'Total Cost (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'purchPriceUSD', label: 'Purchase Price (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'partsCostUSD', label: 'Parts Cost (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'freightChargesUSD', label: 'Freight (USD)', type: 'numeric', aggregatable: true },
+      { entity: 'inventory', field: 'resourceCostUSD', label: 'Labor Cost (USD)', type: 'numeric', aggregatable: true },
+    ];
+    
+    const returnsColumns: QueryColumn[] = [
+      { entity: 'returns', field: 'rmaNumber', label: 'RMA Number', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'rmaStatus', label: 'RMA Status', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'reasonForReturn', label: 'Reason for Return', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'lineStatus', label: 'Line Status', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'lineSolution', label: 'Solution', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'finalCustomer', label: 'Final Customer', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'caseCustomer', label: 'Case Customer', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'typeOfUnit', label: 'Unit Type', type: 'text', aggregatable: false },
+      { entity: 'returns', field: 'createdOn', label: 'Created Date', type: 'date', aggregatable: false },
+      { entity: 'returns', field: 'itemReceivedDate', label: 'Item Received Date', type: 'date', aggregatable: false },
+      { entity: 'returns', field: 'dispatchDate', label: 'Dispatch Date', type: 'date', aggregatable: false },
+    ];
+
+    res.json({
+      inventory: inventoryColumns,
+      returns: returnsColumns,
+      relationships: [
+        {
+          fromEntity: 'inventory',
+          fromField: 'inventSerialId',
+          toEntity: 'returns',
+          toField: 'serialId',
+          label: 'Inventory to Returns (by Serial)'
+        }
+      ]
+    });
+  });
+
+  // Execute dynamic query from query builder
+  app.post("/api/query-builder/execute", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const config = req.body as QueryBuilderConfig;
+      const startTime = Date.now();
+      
+      // Build dynamic SQL query
+      const selectParts: string[] = [];
+      const groupByParts: string[] = [];
+      
+      // Map field names to snake_case for SQL
+      const fieldToColumn = (entity: string, field: string): string => {
+        const mapping: Record<string, string> = {
+          'finalSalesPriceUSD': 'final_sales_price_usd',
+          'finalTotalCostUSD': 'final_total_cost_usd',
+          'purchPriceUSD': 'purch_price_usd',
+          'partsCostUSD': 'parts_cost_usd',
+          'freightChargesUSD': 'freight_charges_usd',
+          'resourceCostUSD': 'resource_cost_usd',
+          'invoicingName': 'invoicing_name',
+          'vendName': 'vend_name',
+          'gradeCondition': 'grade_condition',
+          'transType': 'trans_type',
+          'modelNum': 'model_num',
+          'invoiceDate': 'invoice_date',
+          'salesOrderDate': 'sales_order_date',
+          'purchDate': 'purch_date',
+          'inventSerialId': 'invent_serial_id',
+          'dataAreaId': 'data_area_id',
+          'itemId': 'item_id',
+          'rmaNumber': 'rma_number',
+          'rmaStatus': 'rma_status',
+          'reasonForReturn': 'reason_for_return',
+          'lineStatus': 'line_status',
+          'lineSolution': 'line_solution',
+          'finalCustomer': 'final_customer',
+          'caseCustomer': 'case_customer',
+          'typeOfUnit': 'type_of_unit',
+          'createdOn': 'created_on',
+          'itemReceivedDate': 'item_received_date',
+          'dispatchDate': 'dispatch_date',
+          'serialId': 'serial_id',
+          'areaId': 'area_id',
+        };
+        const prefix = entity === 'inventory' ? 'i' : 'r';
+        return `${prefix}.${mapping[field] || field.toLowerCase()}`;
+      };
+
+      // Add dimensions to SELECT and GROUP BY
+      for (const dim of config.dimensions) {
+        const colRef = fieldToColumn(dim.column.entity, dim.column.field);
+        selectParts.push(`UPPER(COALESCE(${colRef}::text, 'Unknown')) as "${dim.alias}"`);
+        groupByParts.push(`UPPER(COALESCE(${colRef}::text, 'Unknown'))`);
+      }
+
+      // Add measures to SELECT
+      for (const measure of config.measures) {
+        const colRef = fieldToColumn(measure.column.entity, measure.column.field);
+        let aggExpr = '';
+        switch (measure.aggregation) {
+          case 'SUM':
+            aggExpr = `COALESCE(SUM(CAST(${colRef} AS numeric)), 0)`;
+            break;
+          case 'AVG':
+            aggExpr = `COALESCE(AVG(CAST(${colRef} AS numeric)), 0)`;
+            break;
+          case 'COUNT':
+            aggExpr = `COUNT(*)`;
+            break;
+          case 'COUNT_DISTINCT':
+            aggExpr = `COUNT(DISTINCT ${colRef})`;
+            break;
+          case 'MIN':
+            aggExpr = `MIN(CAST(${colRef} AS numeric))`;
+            break;
+          case 'MAX':
+            aggExpr = `MAX(CAST(${colRef} AS numeric))`;
+            break;
+          default:
+            aggExpr = colRef;
+        }
+        selectParts.push(`${aggExpr} as "${measure.alias}"`);
+      }
+
+      // Build FROM clause with optional JOIN
+      let fromClause = 'FROM inventory i';
+      const hasReturns = config.entities.includes('returns');
+      if (hasReturns && config.relationships.length > 0) {
+        const rel = config.relationships[0];
+        const joinType = rel.type === 'inner' ? 'INNER JOIN' : rel.type === 'left' ? 'LEFT JOIN' : 'RIGHT JOIN';
+        fromClause += ` ${joinType} returns r ON i.invent_serial_id = r.serial_id AND i.data_area_id = r.area_id AND i.item_id = r.item_id`;
+      }
+
+      // Build WHERE clause from filters
+      const whereConditions: string[] = [];
+      for (const filter of config.filters) {
+        const colRef = fieldToColumn(filter.column.entity, filter.column.field);
+        switch (filter.operator) {
+          case 'equals':
+            whereConditions.push(`${colRef} = '${filter.value}'`);
+            break;
+          case 'not_equals':
+            whereConditions.push(`${colRef} != '${filter.value}'`);
+            break;
+          case 'contains':
+            whereConditions.push(`${colRef} ILIKE '%${filter.value}%'`);
+            break;
+          case 'starts_with':
+            whereConditions.push(`${colRef} ILIKE '${filter.value}%'`);
+            break;
+          case 'greater_than':
+            whereConditions.push(`CAST(${colRef} AS numeric) > ${filter.value}`);
+            break;
+          case 'less_than':
+            whereConditions.push(`CAST(${colRef} AS numeric) < ${filter.value}`);
+            break;
+          case 'is_null':
+            whereConditions.push(`${colRef} IS NULL`);
+            break;
+          case 'is_not_null':
+            whereConditions.push(`${colRef} IS NOT NULL`);
+            break;
+          case 'in':
+            if (Array.isArray(filter.value)) {
+              const vals = filter.value.map(v => `'${v}'`).join(',');
+              whereConditions.push(`UPPER(${colRef}) IN (${vals.toUpperCase()})`);
+            }
+            break;
+        }
+      }
+      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+      // Build ORDER BY clause
+      let orderByClause = '';
+      if (config.sorts.length > 0) {
+        const sortParts = config.sorts.map(s => {
+          const dir = s.direction === 'desc' ? 'DESC' : 'ASC';
+          return `"${s.columnId}" ${dir}`;
+        });
+        orderByClause = `ORDER BY ${sortParts.join(', ')}`;
+      } else if (config.measures.length > 0) {
+        orderByClause = `ORDER BY "${config.measures[0].alias}" DESC`;
+      }
+
+      // Build LIMIT clause
+      const limitClause = `LIMIT ${config.limit || 100}`;
+
+      // Construct final SQL
+      const groupByClause = groupByParts.length > 0 ? `GROUP BY ${groupByParts.join(', ')}` : '';
+      const sqlQuery = `
+        SELECT ${selectParts.join(', ')}
+        ${fromClause}
+        ${whereClause}
+        ${groupByClause}
+        ${orderByClause}
+        ${limitClause}
+      `;
+
+      // Execute query
+      const result = await pool.query(sqlQuery);
+      const executionTime = Date.now() - startTime;
+
+      // Build column metadata
+      const columns = [
+        ...config.dimensions.map(d => ({ key: d.alias, label: d.alias, type: d.column.type })),
+        ...config.measures.map(m => ({ key: m.alias, label: m.alias, type: 'numeric' })),
+      ];
+
+      const queryResult: QueryResult = {
+        data: result.rows.map(row => {
+          const processed: Record<string, any> = {};
+          for (const key of Object.keys(row)) {
+            processed[key] = typeof row[key] === 'object' ? Number(row[key]) || row[key] : row[key];
+          }
+          return processed;
+        }),
+        columns,
+        rowCount: result.rows.length,
+        executionTime,
+      };
+
+      res.json(queryResult);
+    } catch (error: any) {
+      console.error("Error executing query builder:", error);
+      res.status(500).json({ error: error.message || "Failed to execute query" });
+    }
+  });
+
+  // Generate AI interpretation for query results
+  app.post("/api/query-builder/interpret", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { config, result, chartConfig } = req.body as {
+        config: QueryBuilderConfig;
+        result: QueryResult;
+        chartConfig?: ChartConfig;
+      };
+
+      // Build context for AI
+      const dimensionNames = config.dimensions.map(d => d.alias).join(', ');
+      const measureNames = config.measures.map(m => `${m.alias} (${m.aggregation})`).join(', ');
+      const dataPreview = result.data.slice(0, 10);
+
+      let interpretation: QueryAIInterpretation;
+
+      if (openai) {
+        try {
+          const prompt = `You are a business intelligence analyst. Analyze this custom query result and provide executive insights.
+
+Query Configuration:
+- Name: ${config.name}
+- Description: ${config.description || 'No description'}
+- Dimensions (grouping): ${dimensionNames}
+- Measures (metrics): ${measureNames}
+- Chart Type: ${chartConfig?.type || 'table'}
+- Rows returned: ${result.rowCount}
+
+Sample Data (first 10 rows):
+${JSON.stringify(dataPreview, null, 2)}
+
+Provide a JSON response with:
+{
+  "summary": "One paragraph executive summary of what this data shows",
+  "insights": ["Array of 3-4 key business insights from the data"],
+  "recommendations": ["Array of 2-3 actionable recommendations based on findings"],
+  "trends": ["Array of any notable trends or patterns observed"]
+}`;
+
+          const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [{ role: "user", content: prompt }],
+            response_format: { type: "json_object" },
+            max_tokens: 1000,
+          });
+
+          const content = response.choices[0]?.message?.content;
+          if (content) {
+            const parsed = JSON.parse(content);
+            interpretation = {
+              summary: parsed.summary || 'Analysis complete.',
+              insights: parsed.insights || [],
+              recommendations: parsed.recommendations || [],
+              trends: parsed.trends || [],
+              generatedAt: new Date().toISOString(),
+            };
+          } else {
+            throw new Error('No content from AI');
+          }
+        } catch (aiError) {
+          console.error("AI interpretation error:", aiError);
+          interpretation = generateFallbackInterpretation(config, result);
+        }
+      } else {
+        interpretation = generateFallbackInterpretation(config, result);
+      }
+
+      res.json(interpretation);
+    } catch (error: any) {
+      console.error("Error generating interpretation:", error);
+      res.status(500).json({ error: "Failed to generate interpretation" });
+    }
+  });
+
+  // Helper function for fallback interpretation
+  function generateFallbackInterpretation(config: QueryBuilderConfig, result: QueryResult): QueryAIInterpretation {
+    const insights: string[] = [];
+    const recommendations: string[] = [];
+    
+    if (result.rowCount > 0) {
+      insights.push(`Query returned ${result.rowCount} result rows grouped by ${config.dimensions.map(d => d.alias).join(', ')}.`);
+      
+      // Find top performer if there are measures
+      if (config.measures.length > 0 && result.data.length > 0) {
+        const topRow = result.data[0];
+        const firstMeasure = config.measures[0].alias;
+        insights.push(`Top performer: ${topRow[config.dimensions[0]?.alias] || 'Unknown'} with ${firstMeasure} of ${Number(topRow[firstMeasure] || 0).toLocaleString()}.`);
+      }
+      
+      recommendations.push('Consider drilling deeper into top performers to identify success factors.');
+      recommendations.push('Compare these results with previous time periods for trend analysis.');
+    } else {
+      insights.push('No data matched the specified query criteria.');
+      recommendations.push('Try adjusting your filters to broaden the search scope.');
+    }
+
+    return {
+      summary: `This custom analysis examines ${config.measures.map(m => m.alias).join(', ')} across ${config.dimensions.map(d => d.alias).join(', ')}. ${insights[0]}`,
+      insights,
+      recommendations,
+      trends: [],
+      generatedAt: new Date().toISOString(),
+    };
+  }
 
   // ============================================
   // DRILL-DOWN - Dynamic data exploration

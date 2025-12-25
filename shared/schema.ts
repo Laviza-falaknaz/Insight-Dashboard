@@ -621,6 +621,125 @@ export interface DrillDownConfig {
   groupBy?: string;
 }
 
+// ========== BI QUERY BUILDER TYPES ==========
+
+// Available entities for query building
+export type QueryEntity = 'inventory' | 'returns';
+
+// Column definition for query builder
+export interface QueryColumn {
+  entity: QueryEntity;
+  field: string;
+  label: string;
+  type: 'text' | 'numeric' | 'date';
+  aggregatable: boolean;
+}
+
+// Aggregation types
+export type AggregationType = 'SUM' | 'AVG' | 'COUNT' | 'MIN' | 'MAX' | 'COUNT_DISTINCT' | 'NONE';
+
+// Filter operator types
+export type FilterOperator = 'equals' | 'not_equals' | 'contains' | 'starts_with' | 'ends_with' | 
+  'greater_than' | 'less_than' | 'greater_equal' | 'less_equal' | 'between' | 'in' | 'not_in' | 'is_null' | 'is_not_null';
+
+// Query filter definition
+export interface QueryFilter {
+  id: string;
+  column: QueryColumn;
+  operator: FilterOperator;
+  value: string | number | string[] | [number, number];
+}
+
+// Query measure (aggregated column)
+export interface QueryMeasure {
+  id: string;
+  column: QueryColumn;
+  aggregation: AggregationType;
+  alias: string;
+}
+
+// Query dimension (grouping column)
+export interface QueryDimension {
+  id: string;
+  column: QueryColumn;
+  alias: string;
+}
+
+// Sort configuration
+export interface QuerySort {
+  columnId: string;
+  direction: 'asc' | 'desc';
+}
+
+// Top/Bottom filter
+export interface TopBottomFilter {
+  enabled: boolean;
+  type: 'top' | 'bottom';
+  count: number;
+  byColumn: string;
+}
+
+// Relationship configuration for joins
+export interface QueryRelationship {
+  fromEntity: QueryEntity;
+  fromField: string;
+  toEntity: QueryEntity;
+  toField: string;
+  type: 'inner' | 'left' | 'right';
+}
+
+// Complete query builder configuration
+export interface QueryBuilderConfig {
+  name: string;
+  description?: string;
+  entities: QueryEntity[];
+  dimensions: QueryDimension[];
+  measures: QueryMeasure[];
+  filters: QueryFilter[];
+  sorts: QuerySort[];
+  topBottom?: TopBottomFilter;
+  relationships: QueryRelationship[];
+  limit: number;
+}
+
+// Chart configuration for visualization
+export type ChartType = 'bar' | 'line' | 'pie' | 'area' | 'scatter' | 'table';
+
+export interface ChartConfig {
+  type: ChartType;
+  xAxis?: string;
+  yAxis?: string[];
+  colorBy?: string;
+  showLegend: boolean;
+  showGrid: boolean;
+}
+
+// Query execution result
+export interface QueryResult {
+  data: Record<string, any>[];
+  columns: { key: string; label: string; type: string }[];
+  rowCount: number;
+  executionTime: number;
+  sql?: string;
+}
+
+// AI interpretation for query results
+export interface QueryAIInterpretation {
+  summary: string;
+  insights: string[];
+  recommendations: string[];
+  trends?: string[];
+  generatedAt: string;
+}
+
+// Complete saved query with AI interpretation
+export interface SavedQueryWithInterpretation {
+  collection: SavedCollection;
+  lastResult?: QueryResult;
+  interpretation?: QueryAIInterpretation;
+  chartConfig?: ChartConfig;
+}
+
 // ========== STRATEGIC EXECUTIVE INSIGHTS ==========
 
 // Sales with Returns Impact Analysis

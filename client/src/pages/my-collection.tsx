@@ -6,11 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from "recharts";
-import { Folder, Play, Trash2, Edit2, Loader2, Search, BarChart3, PieChartIcon, LineChartIcon, TableIcon, FolderOpen } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend, AreaChart, Area } from "recharts";
+import { Folder, Play, Trash2, Edit2, Loader2, Search, BarChart3, PieChartIcon, LineChartIcon, TableIcon, FolderOpen, Sparkles, RefreshCw, ChevronRight, Lightbulb } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { SavedCollection } from "@shared/schema";
+import type { SavedCollection, QueryAIInterpretation, QueryBuilderConfig } from "@shared/schema";
 
 const CHART_COLORS = [
   "hsl(var(--primary))",
@@ -29,7 +29,10 @@ export default function MyCollectionPage() {
   
   const [selectedCollection, setSelectedCollection] = useState<SavedCollection | null>(null);
   const [collectionData, setCollectionData] = useState<any[]>([]);
+  const [collectionColumns, setCollectionColumns] = useState<{ key: string; label: string; dataType: string; aggregation?: string }[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [isInterpreting, setIsInterpreting] = useState(false);
+  const [interpretation, setInterpretation] = useState<QueryAIInterpretation | null>(null);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -74,15 +77,84 @@ export default function MyCollectionPage() {
   const runCollection = async (collection: SavedCollection) => {
     setSelectedCollection(collection);
     setIsRunning(true);
+    setInterpretation(null);
+    setCollectionData([]);
+    setCollectionColumns([]);
+    
     try {
       const config = JSON.parse(collection.queryConfig);
-      const response = await apiRequest("POST", `/api/explore/${collection.insightType}`, config);
-      const result = await response.json();
-      setCollectionData(result.data || []);
+      
+      // Check if this is a custom query builder config or legacy insight type
+      if (collection.insightType === 'custom' && config.dimensions) {
+        // New query builder format
+        const response = await apiRequest("POST", "/api/query-builder/execute", config);
+        const result = await response.json();
+        setCollectionData(result.data || []);
+        setCollectionColumns(result.columns || []);
+      } else {
+        // Legacy insight type
+        const response = await apiRequest("POST", `/api/explore/${collection.insightType}`, config);
+        const result = await response.json();
+        setCollectionData(result.data || []);
+        setCollectionColumns([]);
+      }
     } catch (error: any) {
       toast({ title: "Error", description: error.message || "Failed to run collection", variant: "destructive" });
+      setCollectionData([]);
+      setCollectionColumns([]);
     } finally {
       setIsRunning(false);
+    }
+  };
+
+  const refreshInterpretation = async () => {
+    if (!selectedCollection || collectionData.length === 0) return;
+    
+    setIsInterpreting(true);
+    try {
+      const config = JSON.parse(selectedCollection.queryConfig);
+      
+      // Build column metadata that matches the interpret endpoint contract
+      const columnMetadata = collectionColumns.length > 0 
+        ? collectionColumns.map(c => ({
+            key: c.key,
+            label: c.label,
+            dataType: c.dataType || 'text',
+            aggregation: c.aggregation,
+          }))
+        : Object.keys(collectionData[0] || {}).map(key => ({
+            key,
+            label: key,
+            dataType: typeof collectionData[0][key] === 'number' ? 'number' : 'text',
+          }));
+      
+      const response = await apiRequest("POST", "/api/query-builder/interpret", {
+        config,
+        result: { 
+          data: collectionData.slice(0, 100), 
+          columns: columnMetadata, 
+          rowCount: collectionData.length, 
+          executionTime: 0 
+        },
+        chartConfig: { 
+          type: selectedCollection.chartType || 'bar', 
+          showLegend: true, 
+          showGrid: true 
+        },
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to generate interpretation');
+      }
+      
+      const result = await response.json();
+      setInterpretation(result);
+      toast({ title: "AI Analysis Complete", description: "Interpretation updated with latest data" });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message || "Failed to generate interpretation", variant: "destructive" });
+    } finally {
+      setIsInterpreting(false);
     }
   };
 
@@ -109,9 +181,23 @@ export default function MyCollectionPage() {
   const renderChart = (collection: SavedCollection, data: any[]) => {
     if (data.length === 0) return null;
 
-    const dataKey = getDataKey(collection.insightType);
-    const chartData = data.slice(0, 10);
+    const isCustom = collection.insightType === 'custom' && collectionColumns.length > 0;
+    const chartData = data.slice(0, 20);
     const chartType = collection.chartType || "bar";
+    
+    // For custom queries, use dynamic columns; for legacy, use fixed columns
+    // Find the first non-numeric column as the category/dimension key
+    let dataKey = isCustom && collectionColumns.length > 0 
+      ? (collectionColumns.find(c => c.dataType !== 'number')?.key || collectionColumns[0].key)
+      : getDataKey(collection.insightType);
+    
+    // Find numeric columns for measures (check both 'dataType' and 'aggregation' presence)
+    const measureKeys = isCustom && collectionColumns.length > 0
+      ? collectionColumns.filter(c => c.dataType === 'number' || c.aggregation).map(c => c.key)
+      : ['revenue', 'profit'];
+    
+    // Fallback if no numeric columns found for custom queries
+    const effectiveMeasureKeys = measureKeys.length > 0 ? measureKeys : (isCustom ? Object.keys(chartData[0] || {}).filter(k => typeof chartData[0][k] === 'number') : ['revenue', 'profit']);
 
     switch (chartType) {
       case "bar":
@@ -123,8 +209,9 @@ export default function MyCollectionPage() {
               <YAxis tick={{ fontSize: 10 }} tickFormatter={(value) => formatCurrency(value)} />
               <Tooltip formatter={(value: number) => formatCurrency(value)} />
               <Legend />
-              <Bar dataKey="revenue" name="Revenue" fill={CHART_COLORS[0]} />
-              <Bar dataKey="profit" name="Profit" fill={CHART_COLORS[1]} />
+              {effectiveMeasureKeys.map((key, i) => (
+                <Bar key={key} dataKey={key} name={key} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+              ))}
             </BarChart>
           </ResponsiveContainer>
         );
@@ -135,7 +222,7 @@ export default function MyCollectionPage() {
             <PieChart>
               <Pie
                 data={chartData}
-                dataKey="revenue"
+                dataKey={effectiveMeasureKeys[0] || "revenue"}
                 nameKey={dataKey}
                 cx="50%"
                 cy="50%"
@@ -161,34 +248,66 @@ export default function MyCollectionPage() {
               <YAxis tick={{ fontSize: 10 }} tickFormatter={(value) => formatCurrency(value)} />
               <Tooltip formatter={(value: number) => formatCurrency(value)} />
               <Legend />
-              <Line type="monotone" dataKey="revenue" name="Revenue" stroke={CHART_COLORS[0]} strokeWidth={2} />
-              <Line type="monotone" dataKey="profit" name="Profit" stroke={CHART_COLORS[1]} strokeWidth={2} />
+              {effectiveMeasureKeys.map((key, i) => (
+                <Line key={key} type="monotone" dataKey={key} name={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} />
+              ))}
             </LineChart>
+          </ResponsiveContainer>
+        );
+
+      case "area":
+        return (
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+              <XAxis dataKey={dataKey} tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={80} />
+              <YAxis tick={{ fontSize: 10 }} tickFormatter={(value) => formatCurrency(value)} />
+              <Tooltip formatter={(value: number) => formatCurrency(value)} />
+              <Legend />
+              {effectiveMeasureKeys.map((key, i) => (
+                <Area key={key} type="monotone" dataKey={key} name={key} fill={CHART_COLORS[i % CHART_COLORS.length]} stroke={CHART_COLORS[i % CHART_COLORS.length]} fillOpacity={0.3} />
+              ))}
+            </AreaChart>
           </ResponsiveContainer>
         );
 
       case "table":
       default:
+        // For custom queries, use dataType; for legacy, use type
+        const displayColumns = isCustom && collectionColumns.length > 0 
+          ? collectionColumns.map(c => ({ ...c, isNumeric: c.dataType === 'number' || !!c.aggregation }))
+          : [
+              { key: dataKey, label: dataKey.charAt(0).toUpperCase() + dataKey.slice(1), isNumeric: false },
+              { key: 'revenue', label: 'Revenue', isNumeric: true },
+              { key: 'profit', label: 'Profit', isNumeric: true },
+              { key: 'margin', label: 'Margin', isNumeric: true },
+              { key: 'units', label: 'Units', isNumeric: true },
+            ];
+        
         return (
           <div className="max-h-80 overflow-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>{dataKey.charAt(0).toUpperCase() + dataKey.slice(1)}</TableHead>
-                  <TableHead className="text-right">Revenue</TableHead>
-                  <TableHead className="text-right">Profit</TableHead>
-                  <TableHead className="text-right">Margin</TableHead>
-                  <TableHead className="text-right">Units</TableHead>
+                  {displayColumns.map(col => (
+                    <TableHead key={col.key} className={col.isNumeric ? 'text-right' : ''}>
+                      {col.label}
+                    </TableHead>
+                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.map((row, index) => (
                   <TableRow key={index} data-testid={`row-collection-${index}`}>
-                    <TableCell className="font-medium">{row[dataKey]}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(row.revenue)}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(row.profit)}</TableCell>
-                    <TableCell className="text-right">{row.margin?.toFixed(1)}%</TableCell>
-                    <TableCell className="text-right">{row.units?.toLocaleString()}</TableCell>
+                    {displayColumns.map(col => (
+                      <TableCell key={col.key} className={col.isNumeric ? 'text-right' : 'font-medium'}>
+                        {col.isNumeric 
+                          ? (col.key === 'margin' 
+                              ? `${Number(row[col.key] || 0).toFixed(1)}%` 
+                              : formatCurrency(Number(row[col.key]) || 0))
+                          : row[col.key]}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))}
               </TableBody>
@@ -300,52 +419,116 @@ export default function MyCollectionPage() {
             </div>
           </div>
 
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 space-y-4">
             {selectedCollection ? (
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <CardTitle>{selectedCollection.name}</CardTitle>
-                      {selectedCollection.description && (
-                        <CardDescription>{selectedCollection.description}</CardDescription>
+              <>
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                      <div>
+                        <CardTitle>{selectedCollection.name}</CardTitle>
+                        {selectedCollection.description && (
+                          <CardDescription>{selectedCollection.description}</CardDescription>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => runCollection(selectedCollection)}
+                          disabled={isRunning}
+                          data-testid="button-refresh-collection"
+                        >
+                          {isRunning ? (
+                            <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                          ) : (
+                            <RefreshCw className="w-4 h-4 mr-1" />
+                          )}
+                          Refresh
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={refreshInterpretation}
+                          disabled={isInterpreting || collectionData.length === 0}
+                          data-testid="button-ai-interpret"
+                        >
+                          {isInterpreting ? (
+                            <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                          ) : (
+                            <Sparkles className="w-4 h-4 mr-1" />
+                          )}
+                          AI Insights
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {isRunning ? (
+                      <div className="flex items-center justify-center h-64">
+                        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : collectionData.length > 0 ? (
+                      renderChart(selectedCollection, collectionData)
+                    ) : (
+                      <div className="flex items-center justify-center h-64 text-muted-foreground">
+                        Click Refresh to load data
+                      </div>
+                    )}
+                  </CardContent>
+                  <CardFooter className="text-sm text-muted-foreground">
+                    Created: {new Date(selectedCollection.createdAt!).toLocaleDateString()}
+                    {selectedCollection.updatedAt && selectedCollection.updatedAt !== selectedCollection.createdAt && (
+                      <span className="ml-4">Updated: {new Date(selectedCollection.updatedAt).toLocaleDateString()}</span>
+                    )}
+                  </CardFooter>
+                </Card>
+
+                {interpretation && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-medium flex items-center gap-2">
+                        <Lightbulb className="h-4 w-4 text-yellow-500" />
+                        AI Interpretation
+                      </CardTitle>
+                      <CardDescription className="text-xs">
+                        Generated: {new Date(interpretation.generatedAt).toLocaleString()}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <p className="text-sm">{interpretation.summary}</p>
+                      
+                      {interpretation.insights && interpretation.insights.length > 0 && (
+                        <div>
+                          <p className="text-xs text-muted-foreground font-medium mb-1">Key Insights</p>
+                          <ul className="space-y-1">
+                            {interpretation.insights.map((insight, i) => (
+                              <li key={i} className="text-sm flex items-start gap-2">
+                                <ChevronRight className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                                {insight}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
                       )}
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => runCollection(selectedCollection)}
-                      disabled={isRunning}
-                      data-testid="button-refresh-collection"
-                    >
-                      {isRunning ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Play className="w-4 h-4" />
+
+                      {interpretation.recommendations && interpretation.recommendations.length > 0 && (
+                        <div>
+                          <p className="text-xs text-muted-foreground font-medium mb-1">Recommendations</p>
+                          <ul className="space-y-1">
+                            {interpretation.recommendations.map((rec, i) => (
+                              <li key={i} className="text-sm flex items-start gap-2">
+                                <ChevronRight className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
+                                {rec}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
                       )}
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {isRunning ? (
-                    <div className="flex items-center justify-center h-64">
-                      <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : collectionData.length > 0 ? (
-                    renderChart(selectedCollection, collectionData)
-                  ) : (
-                    <div className="flex items-center justify-center h-64 text-muted-foreground">
-                      Click to load data
-                    </div>
-                  )}
-                </CardContent>
-                <CardFooter className="text-sm text-muted-foreground">
-                  Created: {new Date(selectedCollection.createdAt!).toLocaleDateString()}
-                  {selectedCollection.updatedAt && selectedCollection.updatedAt !== selectedCollection.createdAt && (
-                    <span className="ml-4">Updated: {new Date(selectedCollection.updatedAt).toLocaleDateString()}</span>
-                  )}
-                </CardFooter>
-              </Card>
+                    </CardContent>
+                  </Card>
+                )}
+              </>
             ) : (
               <Card>
                 <CardContent className="flex flex-col items-center justify-center py-12">
