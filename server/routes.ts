@@ -3856,7 +3856,7 @@ Be specific with numbers and percentages when available. Prioritize actionable r
   // ============================================
 
   // Get available columns for query builder
-  app.get("/api/query-builder/columns", requireAuth, async (_req: Request, res: Response) => {
+  app.get("/api/query-builder/columns", async (_req: Request, res: Response) => {
     const inventoryColumns: QueryColumn[] = [
       // Text/Dimension fields
       { entity: 'inventory', field: 'dataAreaId', label: 'Data Area ID', type: 'text', aggregatable: false },
