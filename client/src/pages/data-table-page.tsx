@@ -513,6 +513,10 @@ export default function DataTablePage() {
     return <Columns className="h-3 w-3 text-green-500" />;
   };
 
+  const formatColumnName = (field: string): string => {
+    return field.toUpperCase().replace(/_/g, ' ');
+  };
+
   if (columnsLoading) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -643,7 +647,7 @@ export default function DataTablePage() {
                             </SelectTrigger>
                             <SelectContent>
                               {getColumnsForEntity(primaryEntity).map(col => (
-                                <SelectItem key={col.field} value={col.field} className="text-xs">{col.field}</SelectItem>
+                                <SelectItem key={col.field} value={col.field} className="text-xs">{formatColumnName(col.field)}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
@@ -654,7 +658,7 @@ export default function DataTablePage() {
                             </SelectTrigger>
                             <SelectContent>
                               {getColumnsForEntity(secondaryEntity).map(col => (
-                                <SelectItem key={col.field} value={col.field} className="text-xs">{col.field}</SelectItem>
+                                <SelectItem key={col.field} value={col.field} className="text-xs">{formatColumnName(col.field)}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
@@ -697,7 +701,7 @@ export default function DataTablePage() {
                       {selectedColumns.map(col => (
                         <div key={col.id} className="flex items-center gap-1 text-xs bg-background p-1.5 rounded">
                           {getFieldIcon(col.type)}
-                          <span className="flex-1 truncate text-[11px]" title={col.field}>{col.field}</span>
+                          <span className="flex-1 truncate text-[11px]" title={formatColumnName(col.field)}>{formatColumnName(col.field)}</span>
                           <Select 
                             value={col.aggregation || 'none'} 
                             onValueChange={(v) => updateColumnAggregation(col.id, v === 'none' ? undefined : v as AggregationType)}
@@ -733,8 +737,8 @@ export default function DataTablePage() {
                         >
                           <Checkbox checked={isSelected} className="h-3 w-3" />
                           {getFieldIcon(col.type)}
-                          <span className="flex-1 truncate">{col.field}</span>
-                          <Badge variant="outline" className="text-[9px] px-1">{col.entity.slice(0, 3)}</Badge>
+                          <span className="flex-1 truncate">{formatColumnName(col.field)}</span>
+                          <Badge variant="outline" className="text-[9px] px-1">{col.entity.slice(0, 3).toUpperCase()}</Badge>
                         </div>
                       );
                     })}
@@ -779,7 +783,7 @@ export default function DataTablePage() {
                           <SelectContent>
                             {allAvailableColumns.map(col => (
                               <SelectItem key={`${col.entity}.${col.field}`} value={`${col.entity}.${col.field}`} className="text-xs">
-                                {col.field}
+                                {formatColumnName(col.field)}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -848,7 +852,7 @@ export default function DataTablePage() {
                         <SelectContent>
                           {selectedColumns.map(col => (
                             <SelectItem key={`${col.entity}.${col.field}`} value={`${col.entity}.${col.field}`} className="text-xs">
-                              {col.aggregation ? `${col.aggregation}(${col.field})` : col.field}
+                              {col.aggregation ? `${col.aggregation}(${formatColumnName(col.field)})` : formatColumnName(col.field)}
                             </SelectItem>
                           ))}
                         </SelectContent>
