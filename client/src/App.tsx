@@ -4,8 +4,10 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/lib/theme-context";
+import { ColorThemeProvider } from "@/lib/color-theme-context";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ColorThemeSelector } from "@/components/color-theme-selector";
 import { UserMenu } from "@/components/user-menu";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
@@ -44,6 +46,7 @@ function MainLayout({ children }: { children: React.ReactNode }) {
               </span>
             </div>
             <div className="flex items-center gap-2">
+              <ColorThemeSelector />
               <ThemeToggle />
               <UserMenu />
             </div>
@@ -106,7 +109,9 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <AuthProvider>
-            <AppRoutes />
+            <ColorThemeProvider>
+              <AppRoutes />
+            </ColorThemeProvider>
           </AuthProvider>
           <Toaster />
         </TooltipProvider>
