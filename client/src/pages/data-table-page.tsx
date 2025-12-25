@@ -16,6 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Separator } from "@/components/ui/separator";
 import { 
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, 
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell 
@@ -197,7 +198,7 @@ function ValueFilterPopover({
             ) : valuesData?.values?.length === 0 ? (
               <p className="text-xs text-muted-foreground text-center py-4">No values found</p>
             ) : (
-              valuesData?.values?.map((item) => (
+              [...(valuesData?.values || [])].sort((a, b) => a.value.localeCompare(b.value)).map((item) => (
                 <div
                   key={item.value}
                   className="flex items-center gap-2 px-2 py-1 rounded hover-elevate cursor-pointer"
@@ -212,6 +213,91 @@ function ValueFilterPopover({
             )}
           </div>
         </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function DateFilterPopover({
+  field,
+  selectedValues,
+  onValuesChange,
+}: {
+  field: PivotField;
+  selectedValues: string[];
+  onValuesChange: (values: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [startDate, setStartDate] = useState<string>(selectedValues[0] || '');
+  const [endDate, setEndDate] = useState<string>(selectedValues[1] || '');
+
+  const applyFilter = () => {
+    const values: string[] = [];
+    if (startDate) values.push(startDate);
+    if (endDate) values.push(endDate);
+    onValuesChange(values);
+    setOpen(false);
+  };
+
+  const clearFilter = () => {
+    setStartDate('');
+    setEndDate('');
+    onValuesChange([]);
+  };
+
+  const setQuickRange = (days: number) => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - days);
+    setStartDate(start.toISOString().split('T')[0]);
+    setEndDate(end.toISOString().split('T')[0]);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" data-testid={`button-date-filter-${field.field}`}>
+          <Calendar className="h-3 w-3 mr-1" />
+          {selectedValues.length > 0 ? 'Filtered' : 'Date Range'}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-3" align="start">
+        <div className="space-y-3">
+          <div className="text-xs font-medium">Quick Select</div>
+          <div className="flex flex-wrap gap-1">
+            <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => setQuickRange(7)}>Last 7 days</Button>
+            <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => setQuickRange(30)}>Last 30 days</Button>
+            <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => setQuickRange(90)}>Last 90 days</Button>
+            <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => setQuickRange(365)}>Last year</Button>
+          </div>
+          <Separator />
+          <div className="space-y-2">
+            <div>
+              <Label className="text-xs">From</Label>
+              <Input 
+                type="date" 
+                value={startDate} 
+                onChange={(e) => setStartDate(e.target.value)}
+                className="h-8 text-xs"
+                data-testid={`input-date-start-${field.field}`}
+              />
+            </div>
+            <div>
+              <Label className="text-xs">To</Label>
+              <Input 
+                type="date" 
+                value={endDate} 
+                onChange={(e) => setEndDate(e.target.value)}
+                className="h-8 text-xs"
+                data-testid={`input-date-end-${field.field}`}
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" className="h-7 text-xs flex-1" onClick={applyFilter}>Apply</Button>
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={clearFilter}>Clear</Button>
+          </div>
+        </div>
       </PopoverContent>
     </Popover>
   );
@@ -283,6 +369,14 @@ function FieldPill({
           onValuesChange={onFilterChange}
           onTopNChange={onTopNChange}
           topN={field.topN}
+        />
+      )}
+      
+      {showFilter && onFilterChange && field.type === 'date' && (
+        <DateFilterPopover 
+          field={field} 
+          selectedValues={field.filterValues || []} 
+          onValuesChange={onFilterChange}
         />
       )}
       
@@ -768,13 +862,13 @@ export default function DataTablePage() {
       case 'table':
       default:
         return (
-          <div className="border rounded-md overflow-hidden">
-            <div className="max-h-[500px] overflow-auto">
-              <Table>
+          <div className="border rounded-md overflow-hidden w-full">
+            <ScrollArea className="h-[calc(100vh-400px)] min-h-[300px]">
+              <Table className="min-w-full">
                 <TableHeader className="sticky top-0 bg-background z-10">
                   <TableRow>
                     {result.columns.map(col => (
-                      <TableHead key={col.key} className="whitespace-nowrap">{col.label}</TableHead>
+                      <TableHead key={col.key} className="whitespace-nowrap text-xs px-3 py-2">{col.label}</TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>
@@ -782,7 +876,7 @@ export default function DataTablePage() {
                   {chartData.map((row, i) => (
                     <TableRow key={i}>
                       {result.columns.map(col => (
-                        <TableCell key={col.key} className="whitespace-nowrap">
+                        <TableCell key={col.key} className="whitespace-nowrap text-xs px-3 py-1.5">
                           {formatValue(row[col.key], col.type)}
                         </TableCell>
                       ))}
@@ -790,7 +884,7 @@ export default function DataTablePage() {
                   ))}
                 </TableBody>
               </Table>
-            </div>
+            </ScrollArea>
           </div>
         );
     }

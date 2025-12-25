@@ -3757,7 +3757,7 @@ Be specific with numbers and percentages when available. Prioritize actionable r
       }
 
       // Validate insightType
-      const validInsightTypes = ['category', 'customer', 'vendor', 'product', 'monthly', 'status', 'make'];
+      const validInsightTypes = ['category', 'customer', 'vendor', 'product', 'monthly', 'status', 'make', 'custom', 'pivot'];
       if (!validInsightTypes.includes(insightType)) {
         return res.status(400).json({ error: `Invalid insightType. Must be one of: ${validInsightTypes.join(', ')}` });
       }
